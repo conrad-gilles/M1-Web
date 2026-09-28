@@ -1,0 +1,45 @@
+<section>
+  <div class="hero">
+    <p class="eyebrow">MA BIBLIOTHÈQUE</p>
+    <h1>Backing tracks</h1>
+    <p>Importez, retrouvez et écoutez vos morceaux de travail.</p>
+  </div>
+
+  <div class="grid">
+    <article class="card">
+      <h2>Importer</h2>
+      <label>Titre<input [formControl]="title" /></label>
+      <label>Fichier audio<input type="file" accept="audio/*" (change)="choose($event)" /></label>
+      <button type="button" (click)="upload()" [disabled]="!file">Envoyer</button>
+    </article>
+
+    <article class="card">
+      <div class="row">
+        <h2>Mes pistes</h2>
+        <button type="button" (click)="load()">Actualiser</button>
+      </div>
+      @if (loading()) {
+        <p>Chargement…</p>
+      }
+      @for (track of tracks(); track track.id) {
+        <div class="track">
+          <div>
+            <b>{{ track.title }}</b>
+            <small>{{ track.originalName }} · {{ track.size }} Ko</small>
+          </div>
+          <button type="button" (click)="play(track)" [attr.aria-label]="'Lire ' + track.title">▶</button>
+        </div>
+      } @empty {
+        <p>Aucune piste.</p>
+      }
+      <div class="pager">
+        <button type="button" (click)="go(page() - 1)" [disabled]="page() === 1">Préc.</button>
+        <span>Page {{ page() }} / {{ pages() }}</span>
+        <button type="button" (click)="go(page() + 1)" [disabled]="page() === pages()">Suiv.</button>
+      </div>
+      @if (audioUrl()) {
+        <audio [src]="audioUrl()" controls autoplay></audio>
+      }
+    </article>
+  </div>
+</section>

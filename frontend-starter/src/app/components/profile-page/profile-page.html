@@ -1,0 +1,14 @@
+<section class="card">
+  <h1>Mon profil</h1>
+  <button type="button" (click)="load()">Charger mon profil</button>
+  @if (auth.currentUser(); as user) {
+    <p>
+      <b>{{ user.name }}</b><br />{{ user.email }}<br />
+      Membre depuis {{ user.createdAt.slice(0, 10) }}
+    </p>
+    <form [formGroup]="form" (ngSubmit)="save()">
+      <label>Nouveau nom<input formControlName="name" /></label>
+      <button type="submit">Enregistrer</button>
+    </form>
+  }
+</section>
