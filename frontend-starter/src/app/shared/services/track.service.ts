@@ -26,4 +26,8 @@ export class TrackService {
       responseType: 'blob',
     });
   }
+
+  remove(id: string) {
+    return this.http.delete<void>(`/api/tracks/${id}`);
+  }
 }
