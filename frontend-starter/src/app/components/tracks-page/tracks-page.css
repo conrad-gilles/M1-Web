@@ -65,6 +65,11 @@ button:disabled {
   color: #1e2a5c;
 }
 
+progress {
+  display: block;
+  width: 100%;
+}
+
 .tracks {
   display: flex;
   flex-direction: column;
@@ -129,6 +134,10 @@ button:disabled {
   justify-content: center;
   gap: 1rem;
   margin: 0.75rem 0;
+}
+
+.now-playing {
+  margin: 0.5rem 0 0;
 }
 
 audio {

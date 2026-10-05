@@ -18,7 +18,12 @@ export class TrackService {
     const body = new FormData();
     body.append('audio', file);
     body.append('title', title);
-    return this.http.post<Track>('/api/tracks', body);
+    // observe: 'events' + reportProgress exposent la progression de l'envoi
+    // (HttpEventType.UploadProgress) en plus de la réponse finale.
+    return this.http.post<Track>('/api/tracks', body, {
+      reportProgress: true,
+      observe: 'events',
+    });
   }
 
   audio(id: string) {

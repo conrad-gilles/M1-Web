@@ -1,5 +1,5 @@
-import { Component, OnDestroy, computed, inject, signal } from '@angular/core';
-import { HttpErrorResponse } from '@angular/common/http';
+import { Component, ElementRef, OnDestroy, computed, inject, signal, viewChild } from '@angular/core';
+import { HttpErrorResponse, HttpEventType } from '@angular/common/http';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { Track } from '../../shared/models/track.model';
 import { TrackService } from '../../shared/services/track.service';
@@ -44,17 +44,31 @@ export class TracksPageComponent implements OnDestroy {
   readonly isFirstPage = computed(() => this.page() <= 1);
   readonly isLastPage = computed(() => this.page() >= this.pages());
 
+  // --- Filtre par titre (amélioration facultative) ------------------------
+  // Le backend n'expose aucun paramètre de recherche : le filtre ne porte donc
+  // que sur la page de pistes déjà chargée.
+  readonly filterText = signal('');
+  readonly visibleTracks = computed(() => {
+    const query = this.filterText().trim().toLowerCase();
+    if (!query) return this.tracks();
+    return this.tracks().filter((track) => track.title.toLowerCase().includes(query));
+  });
+
   // --- Formulaire d'upload (Mission 3) -----------------------------------
   readonly title = new FormControl('', { nonNullable: true });
   readonly fileError = signal('');
   readonly uploading = signal(false);
   readonly uploadError = signal('');
   readonly uploadSuccess = signal('');
+  /** Progression de l'envoi en pourcentage (0-100). */
+  readonly uploadProgress = signal(0);
   file?: File;
+  private readonly fileInput = viewChild<ElementRef<HTMLInputElement>>('fileInput');
 
   // --- Lecture audio (Mission 3) -----------------------------------------
   readonly audioUrl = signal('');
   readonly playingTrackId = signal<string | null>(null);
+  readonly playingTitle = signal('');
   readonly audioError = signal('');
 
   // --- Suppression (amélioration facultative) -----------------------------
@@ -161,16 +175,27 @@ export class TracksPageComponent implements OnDestroy {
     if (!this.file || this.uploading()) return;
 
     this.uploading.set(true);
+    this.uploadProgress.set(0);
     this.uploadError.set('');
     this.uploadSuccess.set('');
 
     this.service.upload(this.file, this.title.value || this.file.name).subscribe({
-      next: (track) => {
+      next: (event) => {
+        if (event.type === HttpEventType.UploadProgress) {
+          if (event.total) this.uploadProgress.set(Math.round((100 * event.loaded) / event.total));
+          return;
+        }
+        if (event.type !== HttpEventType.Response || !event.body) return;
+
+        const track = event.body;
         console.debug('[TracksPage] Piste envoyée', track.id);
         this.uploading.set(false);
         this.uploadSuccess.set(`« ${track.title} » a été ajoutée à la bibliothèque.`);
         this.title.setValue('');
         this.file = undefined;
+        // `file = undefined` ne vide pas le champ natif : on le réinitialise aussi.
+        const input = this.fileInput()?.nativeElement;
+        if (input) input.value = '';
         // Recharge la première page pour voir immédiatement le nouveau morceau.
         this.page.set(1);
         this.load();
@@ -203,10 +228,12 @@ export class TracksPageComponent implements OnDestroy {
         if (previousUrl) URL.revokeObjectURL(previousUrl);
         this.audioUrl.set(URL.createObjectURL(blob));
         this.playingTrackId.set(track.id);
+        this.playingTitle.set(track.title);
       },
       error: (error: HttpErrorResponse) => {
         console.error('[TracksPage] Lecture impossible', error);
         this.playingTrackId.set(null);
+        this.playingTitle.set('');
         this.audioError.set(this.extractErrorMessage(error, 'Impossible de lire ce morceau.'));
       },
     });
@@ -217,6 +244,7 @@ export class TracksPageComponent implements OnDestroy {
     console.error('[TracksPage] Le lecteur audio a signalé une erreur de décodage');
     this.audioError.set('Le fichier audio ne peut pas être décodé par le navigateur.');
     this.playingTrackId.set(null);
+    this.playingTitle.set('');
   }
 
   onPlaybackEnded(): void {
@@ -238,6 +266,7 @@ export class TracksPageComponent implements OnDestroy {
         this.deletingId.set(null);
         if (this.playingTrackId() === track.id) {
           this.playingTrackId.set(null);
+          this.playingTitle.set('');
           const url = this.audioUrl();
           if (url) URL.revokeObjectURL(url);
           this.audioUrl.set('');

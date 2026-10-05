@@ -1,92 +1,92 @@
-# Aide — Lancer le projet Guitar Practice Cloud
+# Help — Running the Guitar Practice Cloud project
 
-Ce fichier résume tout ce qu'il faut pour relancer le projet (backend +
-frontend) après un redémarrage, une fermeture des terminaux, etc. Il n'est
-pas demandé par le sujet : c'est juste un aide-mémoire personnel.
+This file summarizes everything needed to start the project again (backend +
+frontend) after a restart, closed terminals, etc. It is not required by the
+assignment: it is just a personal memo.
 
-## Prérequis (déjà en place)
+## Prerequisites (already in place)
 
-- Node.js **v22.22.3 ou plus récent** (vérifié : v22.23.2 installé via
-  `winget upgrade OpenJS.NodeJS.22`). Vérifier avec :
+- Node.js **v22.22.3 or newer** (checked: v22.23.2 installed via
+  `winget upgrade OpenJS.NodeJS.22`). Check with:
 
   ```bash
   node -v
   ```
 
-  Si la version est trop ancienne, `ng serve`/`ng build` refusent de démarrer.
+  If the version is too old, `ng serve`/`ng build` refuse to start.
 
-- `backend/.env` déjà créé et rempli avec l'URI MongoDB Atlas et un
-  `JWT_SECRET` généré aléatoirement. **Ne jamais committer ce fichier**
-  (vérifier avec `git status` qu'il n'apparaît pas).
+- `backend/.env` is already created and filled in with the MongoDB Atlas URI
+  and a randomly generated `JWT_SECRET`. **Never commit this file** (check
+  with `git status` that it does not appear).
 
-- **Ne pas utiliser PowerShell** comme terminal pour ce projet (consigne du
-  cours) : utiliser Git Bash.
+- **Do not use PowerShell** as the terminal for this project (course
+  instruction): use Git Bash.
 
-## 1. Démarrer le backend
+## 1. Start the backend
 
-Dans un premier terminal :
+In a first terminal:
 
 ```bash
 cd backend
-npm install       # seulement si node_modules a été supprimé
+npm install       # only if node_modules was deleted
 npm start
 ```
 
-Le backend écoute sur `http://localhost:3000`. Vérifier qu'il répond :
+The backend listens on `http://localhost:3000`. Check that it responds:
 
 ```bash
 curl http://localhost:3000/api/health
-# doit répondre {"status":"ok"}
+# should respond {"status":"ok"}
 ```
 
-Au démarrage, il doit afficher dans le terminal :
+On startup, the terminal should display (the app's log messages are in
+French):
 
 ```text
 [startup] Connecté à MongoDB Atlas
 [startup] La base guitar-practice-cloud est prête à recevoir des données
-[startup] Compte de démonstration déjà présent   (ou "créé" la première fois)
+[startup] Compte de démonstration déjà présent   (or "créé" the first time)
 Guitar Practice Cloud API: http://localhost:3000/api/health
 ```
 
-Si ça affiche une erreur de connexion MongoDB à la place : vérifier
-`backend/.env` (URI, mot de passe, IP autorisée dans Atlas → Network Access).
+If a MongoDB connection error is displayed instead: check `backend/.env`
+(URI, password, IP allowed in Atlas → Network Access).
 
-## 2. Démarrer le frontend
+## 2. Start the frontend
 
-Dans un **second** terminal (laisser le premier tourner) :
+In a **second** terminal (leave the first one running):
 
 ```bash
 cd frontend-starter
-npm install       # seulement si node_modules a été supprimé
+npm install       # only if node_modules was deleted
 npm start
 ```
 
-Ouvrir ensuite `http://localhost:4200` dans le navigateur.
+Then open `http://localhost:4200` in the browser.
 
-### Si `npm install` échoue avec une erreur `Cannot read properties of null (reading 'edgesOut')`
+### If `npm install` fails with a `Cannot read properties of null (reading 'edgesOut')` error
 
-C'est un bug connu de npm avec la résolution des dépendances (peer deps).
-Solution :
+This is a known npm bug with dependency resolution (peer deps). Fix:
 
 ```bash
 rm -rf node_modules package-lock.json
 npm install --legacy-peer-deps
 ```
 
-## 3. Se connecter
+## 3. Log in
 
-Compte de démonstration :
+Demo account:
 
-- email : `demo@example.com`
-- mot de passe : `Demo1234!`
+- email: `demo@example.com`
+- password: `Demo1234!`
 
-Ou créer un compte via la page d'inscription.
+Or create an account through the sign-up page.
 
-## 4. Arrêter les serveurs
+## 4. Stop the servers
 
-Dans chaque terminal, `Ctrl + C`.
+In each terminal, `Ctrl + C`.
 
-## Résumé express (une fois que tout est configuré)
+## Quick summary (once everything is configured)
 
 ```bash
 # Terminal 1
@@ -95,17 +95,17 @@ cd backend && npm start
 # Terminal 2
 cd frontend-starter && npm start
 
-# Navigateur
+# Browser
 http://localhost:4200
 ```
 
-## Dépannage rapide
+## Quick troubleshooting
 
-| Symptôme | Cause probable | Solution |
+| Symptom | Likely cause | Solution |
 |---|---|---|
-| `ng serve`/`ng build` refuse de démarrer, erreur de version Node | Node trop ancien | `winget upgrade OpenJS.NodeJS.22` (ou réinstaller Node ≥ 22.22.3) puis ouvrir un nouveau terminal |
-| `Cannot read properties of null (reading 'edgesOut')` pendant `npm install` | Bug npm/Arborist avec les peer deps | `rm -rf node_modules package-lock.json && npm install --legacy-peer-deps` |
-| Backend : `Échec de connexion à MongoDB` | URI/mot de passe incorrect, ou IP non autorisée | Vérifier `backend/.env`, vérifier Atlas → Network Access → IP Access List |
-| Page blanche ou erreurs CORS/404 sur `/api/...` | Backend non démarré, ou `proxy.conf.json` mal configuré | Vérifier que le backend tourne sur le port 3000 et que `frontend-starter/proxy.conf.json` pointe vers `http://localhost:3000` |
-| `401` sur toutes les requêtes après un moment | Token JWT expiré (durée de vie : 2h) | Se reconnecter ; l'app redirige maintenant automatiquement vers `/login` dans ce cas |
-| Upload refusé avec un message d'erreur | Format non supporté (seuls MP3, WAV, OGG, M4A) ou fichier > 25 Mo | Vérifier le fichier utilisé, essayer ceux de `frontend-starter/fichiers-audio-de-test/` |
+| `ng serve`/`ng build` refuses to start, Node version error | Node too old | `winget upgrade OpenJS.NodeJS.22` (or reinstall Node ≥ 22.22.3) then open a new terminal |
+| `Cannot read properties of null (reading 'edgesOut')` during `npm install` | npm/Arborist bug with peer deps | `rm -rf node_modules package-lock.json && npm install --legacy-peer-deps` |
+| Backend: `Échec de connexion à MongoDB` (MongoDB connection failed) | Wrong URI/password, or IP not allowed | Check `backend/.env`, check Atlas → Network Access → IP Access List |
+| Blank page or CORS/404 errors on `/api/...` | Backend not started, or `proxy.conf.json` misconfigured | Check that the backend is running on port 3000 and that `frontend-starter/proxy.conf.json` points to `http://localhost:3000` |
+| `401` on every request after a while | JWT token expired (lifetime: 2h) | Log in again; the app now automatically redirects to `/login` in this case |
+| Upload rejected with an error message | Unsupported format (only MP3, WAV, OGG, M4A) or file > 25 MB | Check the file you are using, try the ones in `frontend-starter/fichiers-audio-de-test/` |

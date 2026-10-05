@@ -12,3 +12,7 @@ https://github.com/micbuffa/TechnosWeb_M1_INFO_2026_2027
 
 Github M1InfoWebTechnos2025_2026:
 https://github.com/micbuffa/M1InfoWebTechnos2025_2026
+
+Todo Install handoff skill!
+
+Todo PeerJs web rtc
