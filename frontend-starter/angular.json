@@ -18,7 +18,8 @@
                             }
                         ],
                         "styles": [
-                            "src/styles.css"
+                            "src/styles.css",
+                            "src/material-theme.scss"
                         ]
                     }
                 },
@@ -32,7 +33,11 @@
                     "defaultConfiguration": "development"
                 },
                 "test": {
-                    "builder": "@angular/build:unit-test"
+                    "builder": "@angular/build:unit-test",
+                    "options": {
+                        "buildTarget": "gpc:build",
+                        "tsConfig": "tsconfig.spec.json"
+                    }
                 }
             }
         }

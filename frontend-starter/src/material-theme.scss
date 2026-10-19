@@ -1,0 +1,16 @@
+// Thème Angular Material, utilisé uniquement par le SnackBar (notifications).
+// Le reste de l'application garde ses styles dans styles.css.
+@use '@angular/material' as mat;
+
+html {
+  @include mat.theme(
+    (
+      color: mat.$green-palette,
+      typography: Inter,
+      density: 0,
+    )
+  );
+  // Le reste de l'application n'a pas de mode sombre : on le désactive aussi
+  // pour le SnackBar afin que les couleurs restent cohérentes.
+  color-scheme: light;
+}

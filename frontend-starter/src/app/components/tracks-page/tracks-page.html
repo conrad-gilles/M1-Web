@@ -12,7 +12,14 @@
       <label>Titre<input [formControl]="title" /></label>
       <label>
         Fichier audio
-        <input #fileInput type="file" accept="audio/*" (change)="choose($event)" [attr.aria-describedby]="fileError() ? 'file-error' : null" />
+        <input
+          #fileInput
+          type="file"
+          accept="audio/*"
+          [disabled]="uploading()"
+          (change)="choose($event)"
+          [attr.aria-describedby]="fileError() ? 'file-error' : null"
+        />
       </label>
 
       @if (fileError()) {
@@ -25,13 +32,16 @@
 
       @if (uploading()) {
         <p class="message loading" role="status">Envoi du fichier, veuillez patienter…</p>
+        <!-- Sans attribut value, <progress> est indéterminée (taille totale inconnue). -->
         <progress
-          [value]="uploadProgress()"
+          [attr.value]="uploadPercent()"
           max="100"
           aria-label="Progression de l'envoi"
-          [attr.aria-valuetext]="uploadProgress() + ' %'"
+          [attr.aria-valuetext]="uploadPercent() === null ? 'Envoi en cours' : uploadPercent() + ' %'"
         ></progress>
-        <small>{{ uploadProgress() }} %</small>
+        @if (uploadPercent() !== null) {
+          <small>{{ uploadPercent() }} %</small>
+        }
       }
       @if (uploadError()) {
         <p class="message error" role="alert">{{ uploadError() }}</p>
@@ -52,9 +62,6 @@
       }
       @if (listError()) {
         <p class="message error" role="alert">{{ listError() }}</p>
-      }
-      @if (deleteError()) {
-        <p class="message error" role="alert">{{ deleteError() }}</p>
       }
 
       <label>
@@ -87,10 +94,10 @@
                 type="button"
                 class="danger"
                 (click)="remove(track)"
-                [disabled]="deletingId() === track.id"
+                [disabled]="deletingId() !== null"
                 [attr.aria-label]="'Supprimer ' + track.title"
               >
-                {{ deletingId() === track.id ? '…' : '🗑' }}
+                {{ deletingId() === track.id ? 'Suppression…' : 'Supprimer' }}
               </button>
             </div>
           </div>
