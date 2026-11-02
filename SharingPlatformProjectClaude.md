@@ -155,9 +155,9 @@ Re-check them before creating the accounts.
 | [MongoDB Atlas](https://www.mongodb.com/docs/atlas/reference/free-shared-limitations/) (free cluster) | Users, media metadata, rooms | No | 512 MB in total. Metadata only, never media files (GridFS). Paused after 30 days without any connection; resume it from the Atlas dashboard. |
 | [Backblaze B2](https://www.backblaze.com/cloud-storage/pricing) (free tier) | Media files (choice explained in §7.1) | No (private bucket) | 10 GB of storage. Per day: 1 GB of downloads and 2,500 download requests. S3-compatible: private bucket, presigned URLs, Range requests. |
 | GitHub Pages | Angular frontend (optional) | No | Static files only. Deep links such as `/rooms/abc` need a `404.html` fallback. The dev proxy (`proxy.conf.json`) does not exist in production, so the frontend needs an API base URL and the backend a CORS configuration. |
-| PeerServer (`peer` package inside the Express app) | P2P signaling (phase 5) | No (runs on Render) | Reuses the Render service; no extra account. The public PeerJS cloud server is a no-account fallback. |
-| Google public STUN (`stun:stun.l.google.com:19302`) | P2P address discovery (phase 5) | No account | Enough for most home connections. |
-| TURN relay (for example [Metered](https://www.metered.ca/stun-turn) free tier) | P2P relay when a direct connection fails (phase 5) | No, at the time of writing | Small monthly allowance (500 MB advertised). Sync messages are tiny, so it is enough. If no card-free TURN remains, peers behind strict networks simply cannot join; accepted limitation. |
+| PeerServer (`peer` package inside the Express app) | P2P signaling (phase 3.6) | No (runs on Render) | Reuses the Render service; no extra account. The public PeerJS cloud server is a no-account fallback. |
+| Google public STUN (`stun:stun.l.google.com:19302`) | P2P address discovery (phase 3.6) | No account | Enough for most home connections. |
+| TURN relay (for example [Metered](https://www.metered.ca/stun-turn) free tier) | P2P relay when a direct connection fails (phase 3.6) | No, at the time of writing | Small monthly allowance (500 MB advertised). Sync messages are tiny, so it is enough. If no card-free TURN remains, peers behind strict networks simply cannot join; accepted limitation. |
 
 Consequences:
 - The current upload code would lose every file on Render. **Storage must move to object storage
@@ -179,7 +179,7 @@ server's own disk, which Render wipes. The PoC needs a storage service that the 
 - Usable from the Node backend, ideally through the **S3 API** so the code is not tied to one provider.
 - **Private files** with expiring signed URLs: rooms decide who may play what (§8).
 - **HTTP Range requests**, so `<audio>` and `<video>` can stream and seek.
-- A per-file limit large enough for video (phase 4).
+- A per-file limit large enough for video (phase 3.5).
 
 **Options compared** (researched October 2026; free tiers change often, re-check before signing up)
 
@@ -210,7 +210,7 @@ How the code uses it:
   local disk for development and tests, S3 for B2. Tests keep running offline, and moving to R2 or AWS S3
   later only changes environment variables.
 - **Upload.** Audio (up to 25 MB): Node keeps receiving the upload with Multer and forwards it to B2
-  (`@aws-sdk/lib-storage`), then saves the metadata. Video (phase 4): the browser uploads directly to B2
+  (`@aws-sdk/lib-storage`), then saves the metadata. Video (phase 3.5): the browser uploads directly to B2
   with a presigned URL (this needs CORS rules on the bucket) and Node only records the metadata.
 - **Playback.** The API checks ownership or room membership, then returns a presigned GET URL
   (`@aws-sdk/s3-request-presigner`) valid for at least the media's duration (presigned URLs last 7 days
@@ -225,7 +225,7 @@ Living with the free limits:
   a generic `error` event, so the player should show "media temporarily unavailable" instead of failing
   silently. Never add a payment method to the B2 account: without one, B2 cannot bill anything.
 - When the free limits are too small, they are accepted, not bought off: keep files short, enforce
-  per-user quotas, and rely on phase 5, where every viewer plays their own local copy and storage
+  per-user quotas, and rely on phase 3.6, where every viewer plays their own local copy and storage
   bandwidth drops to zero.
 
 Sources: [B2 pricing](https://www.backblaze.com/cloud-storage/pricing),
@@ -242,6 +242,127 @@ Sources: [B2 pricing](https://www.backblaze.com/cloud-storage/pricing),
 [Render: free tier without a card](https://render.com/articles/platforms-with-a-real-free-tier-for-developers-in-2026),
 [MongoDB Atlas sign-up](https://www.mongodb.com/cloud/atlas/register),
 [Metered TURN](https://www.metered.ca/stun-turn).
+
+### 7.2 Deployment pipeline (continuous deployment)
+
+The whole app (Angular + Express API) runs as **one free Render web service**, connected to the public
+GitHub repo. MongoDB Atlas stays where it is. No service needs a card (§2).
+
+**Code changes needed before the first deploy** (roadmap step 1, §9; not made yet)
+- `backend/src/app.js`: when `frontend-starter/dist/gpc/browser/index.html` exists, serve that folder with
+  `express.static`, and answer every other `GET` outside `/api` with `index.html` so the Angular router
+  handles `/tracks`, `/login`, etc. Placed after the API routes, before the error handler.
+- `backend/src/server.js`: refuse to start when `JWT_SECRET` is missing, like it already does for
+  `MONGODB_URI` (reason below).
+
+**CI workflow** (roadmap step 2): `.github/workflows/ci.yml`, not created yet.
+
+```yaml
+name: CI
+on: [push, pull_request]
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: backend/package-lock.json }
+      - run: npm ci
+      - run: npm test
+  frontend:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: frontend-starter } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: frontend-starter/package-lock.json }
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+```
+
+```text
+push / PR ──► GitHub Actions (CI: backend tests, frontend tests, build)
+                    │ checks green on main
+                    ▼
+              Render: builds Angular, starts Express ──► MongoDB Atlas (free cluster)
+              https://<service>.onrender.com
+```
+
+**How it works**
+1. Anyone pushes to any branch or opens a pull request → CI runs all tests (GitHub Actions is free for
+   public repos).
+2. A merge (or push) to `main` → Render waits until CI is green, then redeploys automatically.
+3. Commits that only touch documentation do not redeploy (build filters below).
+4. The database needs no redeploy: Mongoose creates collections and indexes when the server starts.
+   Data migrations, if ever needed, would be a separate script.
+
+Express serves the Angular build, so the frontend and the API share one URL: no CORS configuration, and
+Angular's relative `/api/...` calls work as in development.
+
+**Step 1 setup: MongoDB Atlas** (roadmap step 1, §9)
+- **Network Access:** Render's free plan has no fixed IP. Add the outbound IPs shown in the Render
+  service (Connect → Outbound), or `0.0.0.0/0` with a strong database password.
+- Use a separate database name for production (for example `guitar-practice-prod` in the URI) so
+  development data stays apart.
+
+**Step 1 setup: Render service (dashboard, not Blueprint)**
+
+Create the service from the dashboard: **New → Web Service → connect GitHub → `conrad-gilles/M1-Web`**.
+Blueprints (`render.yaml`) were reported to ask for a card even for free services; the dashboard flow
+does not.
+
+| Setting | Value |
+|---|---|
+| Branch | `main` |
+| Region | Frankfurt |
+| Root Directory | *(empty)* |
+| Runtime | Node |
+| Build Command | `cd frontend-starter && npm ci && npm run build && cd ../backend && npm ci` |
+| Start Command | `cd backend && node src/server.js` |
+| Instance Type | **Free** |
+
+Environment variables (Render dashboard only, never in Git):
+
+| Key | Value |
+|---|---|
+| `MONGODB_URI` | The Atlas URI with the production database name |
+| `JWT_SECRET` | A long random string: `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"` |
+| `NODE_VERSION` | `22` |
+
+The server refuses to start without `JWT_SECRET`: the fallback secret in `app.js` is visible in the
+public repo, so anyone could forge tokens with it. The B2 settings (`S3_*`, §7.1) join this list in
+phase 3.4.
+
+**Step 2 setup: Render auto-deploy** (roadmap step 2, §9)
+
+In the service's **Settings**:
+- **Health Check Path:** `/api/health`
+- **Auto-Deploy:** *After CI checks pass*
+- **Build Filters → Included paths:** `backend/**`, `frontend-starter/**`
+
+**Step 2 setup: GitHub branch protection**
+
+**Settings → Branches → add a rule for `main`:** require a pull request and require the `backend` and
+`frontend` checks to pass. Nobody (human or AI assistant) can then push untested code to production.
+
+**Team workflow**
+1. Work on a branch (`gilles`, the teammate's branch, ...) and push it: CI runs.
+2. Open a pull request to `main`. Merge once CI is green.
+3. Render deploys `main` a few minutes later. Follow it in the service's **Events** and **Logs** tabs.
+4. Something broke? Render → **Events** → *Rollback* to the previous deploy, then fix on a branch.
+
+**Known limitations of the current deployment**
+- **Uploaded files disappear** on every restart, redeploy and sleep: they stay on Render's local disk
+  until storage moves to Backblaze B2 (§7.1, phase 3.4).
+- **Cold start:** after 15 minutes without traffic, the first request waits about a minute.
+- **Demo account:** `server.js` creates `demo@example.com` / `Demo1234!`, a password published in the
+  README. Anyone can log in with it on the public deployment.
+
+Sources: [Render Blueprint reference](https://render.com/docs/blueprint-spec),
+[Render build filters](https://render.com/docs/build-filters),
+[Render community: Blueprint asking for a card](https://community.render.com/t/blueprint-asking-for-credit-card-even-for-free-services/15257).
 
 ## 8. Security and privacy
 
@@ -264,20 +385,47 @@ Sources: [B2 pricing](https://www.backblaze.com/cloud-storage/pricing),
 
 ## 9. Roadmap
 
-Each phase ends with something that can be demonstrated.
+Three steps, in this order: set up the free services, automate deployment, then write the project's
+code. Each step and phase ends with something that can be demonstrated.
+
+### Step 1: free services (no card anywhere, §2)
+
+| Service | What to do | Details |
+|---|---|---|
+| GitHub | Make `conrad-gilles/M1-Web` public and add the teammate as a collaborator. | No secret has ever been committed (checked November 2026). Keep `.env` out of Git. |
+| MongoDB Atlas | Production database name, network access for Render. | §7.2 |
+| Render | Sign up with GitHub, create the free web service from the dashboard, set the environment variables. | §7.2 |
+| Backblaze B2 | Account (EU region), private bucket, application key restricted to that bucket. Keep the keys in a password manager; they go into Render in phase 3.4. | §7.1 |
+| TURN relay | Not yet: create the account in phase 3.6, only if peers cannot connect directly. | §7 |
+
+**Done when:** the current app runs at `https://<service>.onrender.com` (register, log in, upload and play
+a track), and no service has asked for a card. This requires the `app.js` and `server.js` changes listed
+in §7.2 to be on `main`.
+
+### Step 2: continuous deployment
+
+**Content:** the CI workflow (§7.2) on `main`, Render auto-deploy after CI checks pass, build filters, health
+check, branch protection on `main` (§7.2).
+
+**Done when:** a pull request merged into `main` goes live with no manual action; a pull request with a
+failing test cannot be merged and does not deploy; a documentation-only commit does not redeploy.
+
+### Step 3: project coding
+
+From here on, every phase ships through the step 2 pipeline: merged into `main` means deployed.
 
 | Phase | Content | Done when |
 |---|---|---|
-| 0. Groundwork | Generalize `Track` into `Media` (`kind: audio \| video`). Storage module with a local-disk implementation (§7.1). Short-lived media URLs. `<audio src>` loads the URL directly instead of a Blob. Redact URLs in logs. | The Network tab shows `206 Partial Content`, playback starts before the download finishes, seeking works, tests are updated and green. |
-| 1. Rooms | `Room` model (owner, members, media list, invite code). Create, join, leave. Members can stream the room's media. | User B streams a file uploaded by user A only after joining A's room; a non-member gets `404`. |
-| 2. Synced playback | Socket.IO on the Express server, room state, clock offset, commands, drift correction. | Two browsers with two accounts stay within 0.5 s through play, pause and seek; a late joiner starts at the right position. |
-| 3. Cloud storage and deployment | Backblaze B2 private bucket, S3 implementation of the storage module, presigned download URLs, API + frontend on Render, environment configuration. | Files survive a Render restart; the app works from two different networks; reaching B2's daily limit shows a clear message. |
-| 4. Video | Video types and size limits, direct browser upload to B2 with presigned URLs (multipart for large files, bucket CORS rules), magic-byte check, `<video>` player UI. | A 300 MB MP4 uploads, streams and stays in sync for two viewers, within B2's free 1 GB a day. |
-| 5. P2P sync | PeerJS, local file picker, content fingerprint, DataChannel sync reusing the phase 2 protocol. | Two peers with the same local file stay in sync without uploading anything to a server. |
-| 6. Optional | Docker image for self-hosting, host migration when the host leaves, P2P file transfer (WebTorrent-style). | — |
+| 3.1 Groundwork | Generalize `Track` into `Media` (`kind: audio \| video`). Storage module with a local-disk implementation (§7.1). Short-lived media URLs. `<audio src>` loads the URL directly instead of a Blob. Redact URLs in logs. | The Network tab shows `206 Partial Content`, playback starts before the download finishes, seeking works, tests are updated and green. |
+| 3.2 Rooms | `Room` model (owner, members, media list, invite code). Create, join, leave. Members can stream the room's media. | User B streams a file uploaded by user A only after joining A's room; a non-member gets `404`. |
+| 3.3 Synced playback | Socket.IO on the Express server, room state, clock offset, commands, drift correction. | Two browsers with two accounts stay within 0.5 s through play, pause and seek; a late joiner starts at the right position. |
+| 3.4 Cloud storage | S3 implementation of the storage module for B2, presigned download URLs, `S3_*` variables added on Render. | Files survive a Render restart; reaching B2's daily limit shows a clear message. |
+| 3.5 Video | Video types and size limits, direct browser upload to B2 with presigned URLs (multipart for large files, bucket CORS rules), magic-byte check, `<video>` player UI. | A 300 MB MP4 uploads, streams and stays in sync for two viewers, within B2's free 1 GB a day. |
+| 3.6 P2P sync | PeerJS, local file picker, content fingerprint, DataChannel sync reusing the phase 3.3 protocol. | Two peers with the same local file stay in sync without uploading anything to a server. |
+| 3.7 Optional | Docker image for self-hosting, host migration when the host leaves, P2P file transfer (WebTorrent-style). | — |
 
-Phases 1 and 2 can be built and tested locally with the existing audio upload. Moving storage
-(phase 3) only becomes urgent at deployment time.
+Until phase 3.4, uploads live on Render's local disk and are lost on every restart. That is acceptable
+for demos of phases 3.1 to 3.3; if it becomes annoying, do phase 3.4 earlier.
 
 ## 10. Open questions
 
@@ -310,14 +458,14 @@ Phases 1 and 2 can be built and tested locally with the existing audio upload. M
 - `SYNC_PROTOCOL.md`: room state, messages, tolerances, conflict and buffering rules.
 - A decision log: one short entry per choice (Socket.IO vs `ws`, Backblaze B2 for the PoC and when to
   switch, same origin vs GitHub Pages, strict vs loose matching) with the reason.
-- A deployment guide: environment variables (`MONGODB_URI`, `JWT_SECRET`, the `S3_*` storage settings,
-  allowed origin), Render setup, B2 bucket and application key setup, bucket CORS rules.
+- Keep the deployment pipeline (§7.2) up to date: new environment variables (the `S3_*` storage
+  settings), B2 bucket and application key setup, bucket CORS rules.
 - The list of supported formats, for users.
 - Known limitations: cold start, storage quota, browser support.
 
 ## 13. Existing projects worth studying
 
 - **Syncplay**: synchronizes local files played in mpv or VLC through a small server, and flags when
-  participants' files differ. The closest existing tool to phase 5.
+  participants' files differ. The closest existing tool to phase 3.6.
 - **Watch2Gether**, **Teleparty**: server-synchronized watch parties.
 - **PeerJS** documentation (https://peerjs.com/) and the official WebRTC samples.
