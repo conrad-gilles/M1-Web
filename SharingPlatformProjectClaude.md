@@ -19,7 +19,7 @@ commands, peer to peer, so no file has to be hosted at all.
 - Rooms: an owner invites other users; members can play the room's media.
 - Progressive streaming with seeking.
 - Synchronized playback in a room, within about 0.5 s between participants in different places.
-- Free deployment as a proof of concept.
+- Host the **entire finished application** for free, under the hard constraint below.
 
 **Non-goals (for now)**
 - Live broadcasting (webcam, screen sharing, live events). That requires different technology
@@ -28,6 +28,18 @@ commands, peer to peer, so no file has to be hosted at all.
 - Sample-accurate sync for several speakers in the **same physical room** (< 50 ms). That is a much
   harder problem than a remote watch party.
 - Large public audiences. The target is small groups (2 to 10 people per room).
+
+**Hard constraint: 100 % free, no credit card on any service**
+- The **entire finished application** (frontend, API, WebSocket server, database, media storage and the
+  P2P helper services) runs on free tiers. This applies to the final version, not only the PoC.
+- **No service may ask for a credit card, PayPal or any other payment method**, not even "for
+  verification" or to unlock a free tier. A service that asks for one is rejected, whatever its limits.
+  Firebase Storage and Cloudflare R2 already fail this rule (§7.1).
+- When a free limit is reached, the app degrades gracefully (clear message, try again later). The answer
+  is never "add a card" or "upgrade the plan".
+- Limits accepted by design: cold starts, a daily download allowance, small storage, and free subdomains
+  only (`*.onrender.com`, `*.github.io`); no custom domain, since domains cost money.
+- Free tiers change: check each service's sign-up page before creating the account.
 
 ## 3. Starting point: what the current app already does
 
@@ -45,7 +57,7 @@ commands, peer to peer, so no file has to be hosted at all.
 ### Phase A: server-synchronized (v1)
 
 ```text
-  Browser (Angular)                   Node / Express API              Object storage (R2 / S3)
+  Browser (Angular)                   Node / Express API              Object storage (B2, S3 API)
  +-------------------+   REST + JWT   +----------------------+  signed  +------------------+
  | room page         | -------------> | auth, rooms, media   | -------> | media files      |
  | <audio>/<video>   | <--WebSocket-> | room state (sync)    |   URLs   |                  |
@@ -134,24 +146,102 @@ Rules:
 
 ## 7. Hosting and storage
 
-Free tiers as checked in October 2026. Re-check them before deploying.
+Free tiers as checked in October–November 2026. Every service below is used **without a card** (§2).
+Re-check them before creating the accounts.
 
-| Service | Role | Limits that matter |
-|---|---|---|
-| [Render](https://render.com/docs/free) (free web service) | Node API + WebSocket | Sleeps after 15 min without traffic, about 1 min to wake up. The **local filesystem is wiped** on restart, redeploy and sleep. No persistent disk on the free plan. 750 instance hours per month per workspace. |
-| [MongoDB Atlas](https://www.mongodb.com/docs/atlas/reference/free-shared-limitations/) (free cluster) | Users, media metadata, rooms | 512 MB in total. Metadata only, never media files (GridFS). |
-| [Cloudflare R2](https://developers.cloudflare.com/r2/pricing/) (free tier) | Media files | 10 GB of storage, no egress fees (important for video). S3-compatible presigned URLs support Range requests. |
-| GitHub Pages | Angular frontend (optional) | Static files only. Deep links such as `/rooms/abc` need a `404.html` fallback. The dev proxy (`proxy.conf.json`) does not exist in production, so the frontend needs an API base URL and the backend a CORS configuration. |
+| Service | Role | Card? | Limits that matter |
+|---|---|---|---|
+| [Render](https://render.com/docs/free) (free web service) | Node API + WebSocket, and the built Angular app | No | Sleeps after 15 min without traffic, about 1 min to wake up. The **local filesystem is wiped** on restart, redeploy and sleep. No persistent disk on the free plan. 750 instance hours per month per workspace: enough for **one** service running all month, which is another reason to serve API and frontend from the same service. |
+| [MongoDB Atlas](https://www.mongodb.com/docs/atlas/reference/free-shared-limitations/) (free cluster) | Users, media metadata, rooms | No | 512 MB in total. Metadata only, never media files (GridFS). Paused after 30 days without any connection; resume it from the Atlas dashboard. |
+| [Backblaze B2](https://www.backblaze.com/cloud-storage/pricing) (free tier) | Media files (choice explained in §7.1) | No (private bucket) | 10 GB of storage. Per day: 1 GB of downloads and 2,500 download requests. S3-compatible: private bucket, presigned URLs, Range requests. |
+| GitHub Pages | Angular frontend (optional) | No | Static files only. Deep links such as `/rooms/abc` need a `404.html` fallback. The dev proxy (`proxy.conf.json`) does not exist in production, so the frontend needs an API base URL and the backend a CORS configuration. |
+| PeerServer (`peer` package inside the Express app) | P2P signaling (phase 5) | No (runs on Render) | Reuses the Render service; no extra account. The public PeerJS cloud server is a no-account fallback. |
+| Google public STUN (`stun:stun.l.google.com:19302`) | P2P address discovery (phase 5) | No account | Enough for most home connections. |
+| TURN relay (for example [Metered](https://www.metered.ca/stun-turn) free tier) | P2P relay when a direct connection fails (phase 5) | No, at the time of writing | Small monthly allowance (500 MB advertised). Sync messages are tiny, so it is enough. If no card-free TURN remains, peers behind strict networks simply cannot join; accepted limitation. |
 
 Consequences:
-- The current upload code would lose every file on Render. **Storage must move to object storage before
-  deploying anything that accepts uploads.**
+- The current upload code would lose every file on Render. **Storage must move to object storage
+  (Backblaze B2, see §7.1) before deploying anything that accepts uploads.**
 - Simplest PoC deployment: serve the built Angular app from Express on Render (same origin). No CORS,
   no cross-site cookie problems, a single deployment. Use GitHub Pages only if separate hosting is wanted.
 - Cold start: the first visitor after a quiet period waits about a minute. WebSocket messages count as
   traffic, so an active room keeps the instance awake.
 - Room state kept in memory works for **a single server instance**. Several instances would need shared
   state (for example Redis). That is fine for a PoC.
+
+### 7.1 Media storage for the PoC (free, no card)
+
+The uploaded files are already outside Git (`backend/data/uploads/` is gitignored), but they sit on the
+server's own disk, which Render wipes. The PoC needs a storage service that the backend talks to.
+
+**Requirements**
+- Free **without a credit card** (project rule, §2), so an unexpected bill is impossible.
+- Usable from the Node backend, ideally through the **S3 API** so the code is not tied to one provider.
+- **Private files** with expiring signed URLs: rooms decide who may play what (§8).
+- **HTTP Range requests**, so `<audio>` and `<video>` can stream and seek.
+- A per-file limit large enough for video (phase 4).
+
+**Options compared** (researched October 2026; free tiers change often, re-check before signing up)
+
+| Service | Free allowance | Card needed? | Verdict |
+|---|---|---|---|
+| **Backblaze B2** | 10 GB stored. Per day: 1 GB of downloads, 2,500 download requests (Class B) and 2,500 Class C requests (listing and similar). Uploads are free. | No. Only a *public* bucket needs payment history or a small card payment, and this project uses a private one. | **Chosen.** S3-compatible, private buckets, presigned URLs, Range requests. The 1 GB/day download allowance is the real limit. |
+| Cloudflare R2 | 10 GB stored, no egress fees, 1 million Class A (write) and 10 million Class B (read) operations per month | **Yes**, a card or PayPal to activate R2. Usage beyond the free tier is billed; there is no hard cap. | **Rejected.** Technically the best fit for video, but it needs a card, which the project rules out (§2). |
+| Firebase Storage | No free usage without billing anymore | **Yes.** Since 3 February 2026, Cloud Storage for Firebase requires the pay-as-you-go Blaze plan; Spark projects get 402/403 errors. | **Rejected.** The "Spark plan, no card" claim is out of date. |
+| Supabase Storage | 1 GB stored, 5 GB of egress per month, 50 MB per file (reported by third-party guides) | No | **Rejected.** Too small for video, adds a Postgres project the app does not use, and free projects pause after one week without activity. |
+| Cloudinary | 25 credits per month shared by storage, bandwidth and transformations (1 credit = 1 GB stored *or* 1 GB of video delivered *or* 1,000 transformations) | No | **Not now.** The only option that converts formats (MOV → MP4), but video processing uses credits fast, it has its own API instead of S3, and its free per-file video limit is not documented. Worth revisiting if format support becomes the main problem. |
+| UploadThing | 2 GB stored | No | **Rejected.** An upload service aimed at Next.js/React apps, with its own API and small default per-file limits (video 16 MB, audio 8 MB, configurable). Nothing gained over B2 for Express + Angular. |
+| Internet Archive | Unlimited | No | **Rejected.** Everything uploaded is public and indexed, you must hold the rights to all of it, and it is a library rather than storage for an app. Incompatible with private rooms. |
+| MongoDB GridFS (existing Atlas cluster) | Shares the cluster's 512 MB | No, already set up | **Fallback.** No new account, but tiny, and every byte goes through Node. Enough for an audio-only demo. |
+
+**Decision: Backblaze B2, private bucket, used through the S3 API.**
+
+Setup:
+1. Create the account and choose the **EU data region** at sign-up. It cannot be changed afterwards
+   (moving means creating a new account).
+2. Create a **private** bucket and an application key restricted to that bucket.
+3. Put the settings in `backend/.env` only: `S3_ENDPOINT` (shown on the bucket page, for example
+   `https://s3.eu-central-003.backblazeb2.com`), `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`,
+   `S3_SECRET_ACCESS_KEY`, with empty placeholders in `.env.example`. Same rule as the MongoDB URI:
+   never in Angular, Git, a screenshot or a prompt.
+
+How the code uses it:
+- **A storage module** with three functions (`save`, `signedUrl`, `remove`) and two implementations:
+  local disk for development and tests, S3 for B2. Tests keep running offline, and moving to R2 or AWS S3
+  later only changes environment variables.
+- **Upload.** Audio (up to 25 MB): Node keeps receiving the upload with Multer and forwards it to B2
+  (`@aws-sdk/lib-storage`), then saves the metadata. Video (phase 4): the browser uploads directly to B2
+  with a presigned URL (this needs CORS rules on the bucket) and Node only records the metadata.
+- **Playback.** The API checks ownership or room membership, then returns a presigned GET URL
+  (`@aws-sdk/s3-request-presigner`) valid for at least the media's duration (presigned URLs last 7 days
+  at most). The `<audio>` or `<video>` element loads it, and its Range requests go straight to B2.
+- **Delete.** `DeleteObject` together with the metadata, as `unlink` does today.
+
+Living with the free limits:
+- Every viewer downloads the file separately: a 300 MB video watched by 4 people uses 1.2 GB, more than
+  the daily allowance. Audio (a few MB per MP3) and short videos are fine.
+- Once an allowance is used up, B2 refuses requests with a `403` error (`download_cap_exceeded` or
+  `transaction_cap_exceeded` in B2's API) until the daily counter resets. The media element only reports
+  a generic `error` event, so the player should show "media temporarily unavailable" instead of failing
+  silently. Never add a payment method to the B2 account: without one, B2 cannot bill anything.
+- When the free limits are too small, they are accepted, not bought off: keep files short, enforce
+  per-user quotas, and rely on phase 5, where every viewer plays their own local copy and storage
+  bandwidth drops to zero.
+
+Sources: [B2 pricing](https://www.backblaze.com/cloud-storage/pricing),
+[B2 regions](https://www.backblaze.com/docs/cloud-storage-data-regions),
+[B2 buckets](https://www.backblaze.com/docs/cloud-storage-create-and-manage-buckets),
+[B2 caps & alerts](https://help.backblaze.com/hc/en-us/articles/217931138-How-to-use-B2-data-caps-alerts),
+[B2 error codes](https://www.backblaze.com/docs/cloud-storage-native-api-error-handling-and-status-codes),
+[R2 pricing](https://developers.cloudflare.com/r2/pricing/),
+[R2 card requirement (Cloudflare Community)](https://community.cloudflare.com/t/why-using-r2-free-tier-involves-giving-card-info/945179),
+[Firebase storage changes](https://firebase.google.com/docs/storage/faqs-storage-changes-announced-sept-2024),
+[Supabase pricing](https://supabase.com/pricing),
+[Cloudinary plans](https://cloudinary.com/documentation/billing_and_plans),
+[UploadThing file routes](https://docs.uploadthing.com/file-routes),
+[Render: free tier without a card](https://render.com/articles/platforms-with-a-real-free-tier-for-developers-in-2026),
+[MongoDB Atlas sign-up](https://www.mongodb.com/cloud/atlas/register),
+[Metered TURN](https://www.metered.ca/stun-turn).
 
 ## 8. Security and privacy
 
@@ -166,7 +256,8 @@ Consequences:
   room event, not only on join.
 - **Invites:** random, unguessable, expirable and revocable codes.
 - **CORS:** `cors()` currently accepts every origin. Restrict it to the deployed frontend.
-- **Quotas:** a per-user storage limit (free storage is shared by all users) and upload rate limiting.
+- **Quotas:** a per-user storage limit and upload rate limiting. B2's free 10 GB and 1 GB of downloads
+  per day are shared by all users.
 - **Copyright:** letting users upload films or music and share them with others is distribution. A public
   deployment would need terms of use and a takedown process. The P2P mode where everyone uses their own
   copy avoids hosting content at all.
@@ -177,11 +268,11 @@ Each phase ends with something that can be demonstrated.
 
 | Phase | Content | Done when |
 |---|---|---|
-| 0. Groundwork | Generalize `Track` into `Media` (`kind: audio \| video`). Short-lived media URLs. `<audio src>` loads the URL directly instead of a Blob. Redact URLs in logs. | The Network tab shows `206 Partial Content`, playback starts before the download finishes, seeking works, tests are updated and green. |
+| 0. Groundwork | Generalize `Track` into `Media` (`kind: audio \| video`). Storage module with a local-disk implementation (§7.1). Short-lived media URLs. `<audio src>` loads the URL directly instead of a Blob. Redact URLs in logs. | The Network tab shows `206 Partial Content`, playback starts before the download finishes, seeking works, tests are updated and green. |
 | 1. Rooms | `Room` model (owner, members, media list, invite code). Create, join, leave. Members can stream the room's media. | User B streams a file uploaded by user A only after joining A's room; a non-member gets `404`. |
 | 2. Synced playback | Socket.IO on the Express server, room state, clock offset, commands, drift correction. | Two browsers with two accounts stay within 0.5 s through play, pause and seek; a late joiner starts at the right position. |
-| 3. Cloud storage and deployment | R2 bucket, presigned upload and download, API + frontend on Render, environment configuration. | Files survive a Render restart; the app works from two different networks. |
-| 4. Video | Video types and size limits, presigned multipart upload, magic-byte check, `<video>` player UI. | A 1 GB MP4 uploads, streams and stays in sync. |
+| 3. Cloud storage and deployment | Backblaze B2 private bucket, S3 implementation of the storage module, presigned download URLs, API + frontend on Render, environment configuration. | Files survive a Render restart; the app works from two different networks; reaching B2's daily limit shows a clear message. |
+| 4. Video | Video types and size limits, direct browser upload to B2 with presigned URLs (multipart for large files, bucket CORS rules), magic-byte check, `<video>` player UI. | A 300 MB MP4 uploads, streams and stays in sync for two viewers, within B2's free 1 GB a day. |
 | 5. P2P sync | PeerJS, local file picker, content fingerprint, DataChannel sync reusing the phase 2 protocol. | Two peers with the same local file stay in sync without uploading anything to a server. |
 | 6. Optional | Docker image for self-hosting, host migration when the host leaves, P2P file transfer (WebTorrent-style). | — |
 
@@ -198,6 +289,8 @@ Phases 1 and 2 can be built and tested locally with the existing audio upload. M
 - P2P file matching: strict (hash) or loose (duration) by default?
 - Does the P2P version keep accounts, or use anonymous rooms with invite links?
 - Self-hosting: nice to have, not required. It would need a Docker image and an installation guide.
+- The exact behaviour at each free limit (B2 daily allowance, Atlas 512 MB, Render hours), since paying
+  is never an option (§2).
 - Copyright position if the platform is ever deployed publicly.
 
 ## 11. Testing strategy
@@ -215,10 +308,10 @@ Phases 1 and 2 can be built and tested locally with the existing audio upload. M
 
 - `API_CONTRACT.md`: the new endpoints (rooms, media URLs) and the WebSocket events with their payloads.
 - `SYNC_PROTOCOL.md`: room state, messages, tolerances, conflict and buffering rules.
-- A decision log: one short entry per choice (Socket.IO vs `ws`, R2 vs another storage, same origin vs
-  GitHub Pages, strict vs loose matching) with the reason.
-- A deployment guide: environment variables (`MONGODB_URI`, `JWT_SECRET`, storage keys, allowed origin),
-  Render setup, bucket CORS rules.
+- A decision log: one short entry per choice (Socket.IO vs `ws`, Backblaze B2 for the PoC and when to
+  switch, same origin vs GitHub Pages, strict vs loose matching) with the reason.
+- A deployment guide: environment variables (`MONGODB_URI`, `JWT_SECRET`, the `S3_*` storage settings,
+  allowed origin), Render setup, B2 bucket and application key setup, bucket CORS rules.
 - The list of supported formats, for users.
 - Known limitations: cold start, storage quota, browser support.
 
