@@ -29,12 +29,14 @@ commands, peer to peer, so no file has to be hosted at all.
   harder problem than a remote watch party.
 - Large public audiences. The target is small groups (2 to 10 people per room).
 
-**Hard constraint: 100 % free, no credit card on any service**
+**Hard constraint: 100 % free, no credit card on any service, no paid service ever**
 - The **entire finished application** (frontend, API, WebSocket server, database, media storage and the
   P2P helper services) runs on free tiers. This applies to the final version, not only the PoC.
 - **No service may ask for a credit card, PayPal or any other payment method**, not even "for
   verification" or to unlock a free tier. A service that asks for one is rejected, whatever its limits.
   Firebase Storage and Cloudflare R2 already fail this rule (§7.1).
+- **No paid service, paid plan or paid upgrade, ever.** Every choice in this plan is final under that
+  rule: there is no "switch to a paid option later".
 - When a free limit is reached, the app degrades gracefully (clear message, try again later). The answer
   is never "add a card" or "upgrade the plan".
 - Limits accepted by design: cold starts, a daily download allowance, small storage, and free subdomains
@@ -85,6 +87,9 @@ commands, peer to peer, so no file has to be hosted at all.
 - A small server is still required: **signaling** (peers must find each other before connecting) and
   **STUN/TURN** (to get through home routers and firewalls; TURN relays traffic when a direct connection
   is impossible). "Serverless" here means "no media server", not "no server at all".
+- **Known limitation of the first P2P version:** one peer, the host, holds the room state. **When the host
+  leaves, the room ends** for everyone, who must create or join a new room. Handing the room over to
+  another peer (host migration) is planned later (phase 3.7).
 
 ## 5. Synchronization design (the core of the project)
 
@@ -114,12 +119,20 @@ Rules:
    `playbackRate` (for example 0.95 or 1.05) until caught up; above 1 s, seek.
 4. **No echo loops.** Applying a remote state fires `play`, `pause` and `seeked` events on the media
    element. Those events must not be sent back as new commands.
-5. **Buffering policy.** Either the room waits for the slowest participant, or slow participants catch up
-   on their own. Start with "catch up on their own", which is simpler.
+5. **Buffering: the room waits for the slowest participant** (decision, §10).
+   - **Short buffering is ignored.** Browsers buffer briefly after every play and seek (drift correction
+     seeks too). A client only reports buffering once its player has been stuck for more than 0.5 s;
+     otherwise the room would keep pausing itself.
+   - When a participant reports buffering, the server pauses the room and remembers who is buffering.
+     Once every one of them reports `canplay` again, the server resumes the room for everyone.
+   - **10 s limit.** If a participant is still buffering after 10 s, the room resumes without them. They
+     stay in the room and catch up on their own (drift correction seeks them back to the right position
+     once their player can play). This way one slow connection cannot freeze the room.
+   - A participant who disconnects is removed from the waiting list immediately.
 6. **Autoplay.** Browsers block playback with sound until the user has interacted with the page. Every
    participant must click once ("Join room") before sync can start playback for them.
-7. **Conflicts.** If two people seek at the same moment, the server keeps the last command it received.
-   An optional "host controls only" mode avoids the problem entirely.
+7. **Everyone controls playback** (decision, §10). If two people seek at the same moment, the server keeps
+   the last command it received. Finer-grained control (host only, delegated control) may come later.
 8. **Late joiners** receive the current state as soon as they connect.
 
 ## 6. Media formats and file identity
@@ -132,15 +145,17 @@ Rules:
 - **Large uploads.** Video files weigh hundreds of MB to several GB. One multipart request through Node
   would be slow and fragile. Upload directly from the browser to object storage with a presigned URL
   (multipart upload for large files). The API only records the metadata once storage confirms.
-- **File identity in P2P mode** (answers "do files need the same length or metadata?"): identify a file by
-  its **content hash** (SHA-256), not by its name, duration or tags. Two copies of "the same film" from
-  different sources usually differ (encoding, intro length, frame offset) and would drift apart even if
-  their durations look identical.
-  - Strict mode: hashes must match, so the content is guaranteed identical.
-  - Loose mode: durations match within ±1 s. Allowed with a warning, plus a manual offset slider.
-  - Hashing a multi-GB file in the browser: `crypto.subtle.digest` needs the whole file in memory. Use
-    incremental hashing (for example `hash-wasm`), or a fast fingerprint: size + hash of the first and
-    last few MB.
+- **File identity in P2P mode** (answers "do files need the same length or metadata?").
+  - **v1, very loose matching** (decision, §10): peers can sync if their files have the **same duration**
+    (within 1 s, to absorb rounding differences between browsers) and the **same file type**. Nothing
+    else is compared.
+  - Known risk: two copies of "the same film" from different sources can have the same duration but a
+    different encoding, intro length or frame offset, and then drift apart or show different scenes.
+    Accepted for now.
+  - Later, if that becomes a problem: a strict mode comparing a **content hash** (SHA-256), and a manual
+    offset slider. Hashing a multi-GB file in the browser needs incremental hashing (for example
+    `hash-wasm`) or a fast fingerprint (size + hash of the first and last few MB), because
+    `crypto.subtle.digest` needs the whole file in memory.
 - Browsers cannot reopen a local file from its path after a reload. The user selects the file again for
   each session (the File System Access API can remember it, but only in Chromium browsers).
 
@@ -169,10 +184,11 @@ Consequences:
 - Room state kept in memory works for **a single server instance**. Several instances would need shared
   state (for example Redis). That is fine for a PoC.
 
-### 7.1 Media storage for the PoC (free, no card)
+### 7.1 Media storage (free, no card)
 
 The uploaded files are already outside Git (`backend/data/uploads/` is gitignored), but they sit on the
-server's own disk, which Render wipes. The PoC needs a storage service that the backend talks to.
+server's own disk, which Render wipes. The app needs a storage service that the backend talks to. The
+choice below is the final one, not only the PoC's (§2: no paid service ever).
 
 **Requirements**
 - Free **without a credit card** (project rule, §2), so an unexpected bill is impossible.
@@ -207,8 +223,8 @@ Setup:
 
 How the code uses it:
 - **A storage module** with three functions (`save`, `signedUrl`, `remove`) and two implementations:
-  local disk for development and tests, S3 for B2. Tests keep running offline, and moving to R2 or AWS S3
-  later only changes environment variables.
+  local disk for development and tests, S3 for B2. Tests keep running offline, and the code is not tied
+  to B2: another free S3-compatible service would only change environment variables.
 - **Upload.** Audio (up to 25 MB): Node keeps receiving the upload with Multer and forwards it to B2
   (`@aws-sdk/lib-storage`), then saves the metadata. Video (phase 3.5): the browser uploads directly to B2
   with a presigned URL (this needs CORS rules on the bucket) and Node only records the metadata.
@@ -357,8 +373,11 @@ In the service's **Settings**:
 - **Uploaded files disappear** on every restart, redeploy and sleep: they stay on Render's local disk
   until storage moves to Backblaze B2 (§7.1, phase 3.4).
 - **Cold start:** after 15 minutes without traffic, the first request waits about a minute.
+- **Atlas pause takes the app down:** after 30 days without any connection, Atlas pauses the free
+  cluster. `server.js` refuses to start without the database, so Render keeps restarting the service and
+  the app is unreachable. Fix: resume the cluster in the Atlas dashboard; Render then starts normally.
 - **Demo account:** `server.js` creates `demo@example.com` / `Demo1234!`, a password published in the
-  README. Anyone can log in with it on the public deployment.
+  README. Anyone can log in with it on the public deployment. Kept for now, for testing (decision, §10).
 
 Sources: [Render Blueprint reference](https://render.com/docs/blueprint-spec),
 [Render build filters](https://render.com/docs/build-filters),
@@ -371,6 +390,9 @@ Sources: [Render Blueprint reference](https://render.com/docs/blueprint-spec),
 - **Media URLs:** short-lived and scoped to a single file. If the URL expires during playback, the next
   Range request fails and playback stops once the buffer is empty. The lifetime must cover the media
   duration plus a margin, or the client must refresh the URL.
+  **Known limitation, accepted for now:** for a long film the URL stays valid for hours, and anyone it is
+  forwarded to can stream the file outside the room until it expires, using up the shared B2 daily
+  download allowance (§7.1).
 - **Logs:** the current HTTP logger writes `req.originalUrl`, query string included. Tokens placed in URLs
   would land in the logs. Redact query strings before introducing signed URLs.
 - **WebSocket authentication:** verify the JWT during the handshake and check room membership on every
@@ -379,16 +401,20 @@ Sources: [Render Blueprint reference](https://render.com/docs/blueprint-spec),
 - **CORS:** `cors()` currently accepts every origin. Restrict it to the deployed frontend.
 - **Quotas:** a per-user storage limit and upload rate limiting. B2's free 10 GB and 1 GB of downloads
   per day are shared by all users.
-- **Copyright:** letting users upload films or music and share them with others is distribution. A public
-  deployment would need terms of use and a takedown process. The P2P mode where everyone uses their own
-  copy avoids hosting content at all.
+- **Copyright:** not addressed for now; the project is too small (decision, §10). For later: letting users
+  upload films or music and share them with others is distribution, which would need terms of use and a
+  takedown process. The P2P mode where everyone uses their own copy avoids hosting content at all.
 
 ## 9. Roadmap
 
 Three steps, in this order: set up the free services, automate deployment, then write the project's
 code. Each step and phase ends with something that can be demonstrated.
 
-### Step 1: free services (no card anywhere, §2)
+### Step 1: free services and first deploy (no card anywhere, §2)
+
+Mostly account setup, plus the **two small backend changes** listed in §7.2 (serve the Angular build,
+require `JWT_SECRET`). They are the only code written in this step, because the app cannot run on Render
+without them. They go through a normal pull request to `main`.
 
 | Service | What to do | Details |
 |---|---|---|
@@ -421,25 +447,37 @@ From here on, every phase ships through the step 2 pipeline: merged into `main` 
 | 3.3 Synced playback | Socket.IO on the Express server, room state, clock offset, commands, drift correction. | Two browsers with two accounts stay within 0.5 s through play, pause and seek; a late joiner starts at the right position. |
 | 3.4 Cloud storage | S3 implementation of the storage module for B2, presigned download URLs, `S3_*` variables added on Render. | Files survive a Render restart; reaching B2's daily limit shows a clear message. |
 | 3.5 Video | Video types and size limits, direct browser upload to B2 with presigned URLs (multipart for large files, bucket CORS rules), magic-byte check, `<video>` player UI. | A 300 MB MP4 uploads, streams and stays in sync for two viewers, within B2's free 1 GB a day. |
-| 3.6 P2P sync | PeerJS, local file picker, content fingerprint, DataChannel sync reusing the phase 3.3 protocol. | Two peers with the same local file stay in sync without uploading anything to a server. |
-| 3.7 Optional | Docker image for self-hosting, host migration when the host leaves, P2P file transfer (WebTorrent-style). | — |
+| 3.6 P2P sync | PeerJS, local file picker, anonymous rooms with invite links, file matching on duration and type (§6), DataChannel sync reusing the phase 3.3 protocol. The room ends when the host leaves (§4). | Two peers with matching local files stay in sync without uploading anything to a server and without an account. |
+| 3.7 Optional | Host migration when the host leaves, P2P file transfer (WebTorrent-style), finer-grained playback control. | — |
 
 Until phase 3.4, uploads live on Render's local disk and are lost on every restart. That is acceptable
 for demos of phases 3.1 to 3.3; if it becomes annoying, do phase 3.4 earlier.
 
-## 10. Open questions
+## 10. Decisions and open questions
 
-- Who controls playback: everyone, or only the host (who can hand control to others)?
-- Buffering: does the room wait for everyone, or do slow participants catch up on their own?
-- Sync tolerance: 0.5 s suits a remote watch party. Under 50 ms (same physical room) is a different project.
+**Decided (November 2026)**
+
+| Question | Decision |
+|---|---|
+| Who controls playback? | **Everyone** in the room. Finer-grained control may come later (§5 rule 7). |
+| Buffering | The **room waits for the slowest participant**, at most 10 s, then continues without them; buffering under 0.5 s is ignored (§5 rule 5). |
+| Paid services | **Never**, not even later (§2). |
+| P2P host leaves | The room ends; accepted for the first P2P version (§4). |
+| Forwarded playback URLs | Accepted for now (§8). |
+| Sync tolerance | **0.5 s** between participants. |
+| P2P file matching | **Very loose at first:** same duration and same file type only (§6). |
+| Accounts in the P2P version | **Anonymous rooms** with invite links. |
+| Self-hosting | **None for now.** Users do not host anything; everything the project hosts runs on free services (§2). |
+| Free limit reached (B2, Atlas, Render) | **Do nothing, or show an error message.** Never pay (§2). |
+| Copyright | **Nothing for now**, the project is too small (§8). |
+| Demo account (`demo@example.com`) | **Kept for now**, for testing (§7.2). |
+
+**Still open (for later)**
 - Maximum room size. It drives the P2P topology: a full mesh (everyone connected to everyone) is fine
   for small groups only.
-- P2P file matching: strict (hash) or loose (duration) by default?
-- Does the P2P version keep accounts, or use anonymous rooms with invite links?
-- Self-hosting: nice to have, not required. It would need a Docker image and an installation guide.
-- The exact behaviour at each free limit (B2 daily allowance, Atlas 512 MB, Render hours), since paying
-  is never an option (§2).
-- Copyright position if the platform is ever deployed publicly.
+- When to add finer-grained playback control, and stricter file matching (content hash) if loose
+  matching causes problems.
+- Copyright position, if the platform ever grows.
 
 ## 11. Testing strategy
 
@@ -456,8 +494,8 @@ for demos of phases 3.1 to 3.3; if it becomes annoying, do phase 3.4 earlier.
 
 - `API_CONTRACT.md`: the new endpoints (rooms, media URLs) and the WebSocket events with their payloads.
 - `SYNC_PROTOCOL.md`: room state, messages, tolerances, conflict and buffering rules.
-- A decision log: one short entry per choice (Socket.IO vs `ws`, Backblaze B2 for the PoC and when to
-  switch, same origin vs GitHub Pages, strict vs loose matching) with the reason.
+- A decision log: one short entry per choice (Socket.IO vs `ws`, Backblaze B2 as the storage, same origin
+  vs GitHub Pages, strict vs loose matching) with the reason.
 - Keep the deployment pipeline (§7.2) up to date: new environment variables (the `S3_*` storage
   settings), B2 bucket and application key setup, bucket CORS rules.
 - The list of supported formats, for users.
