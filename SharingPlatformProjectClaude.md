@@ -6,7 +6,8 @@
 ## 1. The idea in one paragraph
 
 A "watch party" platform built on top of the current Guitar Practice Cloud app. A user uploads an
-audio or video file once, invites other users into a **room**, and everyone in the room plays the same
+audio or video file once, shares a short **room code**, and everyone who joins with it (no account
+needed) plays the same
 file at the same moment: play, pause, seek and "next file" are synchronized. Each participant
 **streams** the file progressively (playback starts before the whole file is downloaded, seeking works).
 A later version lets every user keep the media file on their own machine and only exchange playback
@@ -16,7 +17,9 @@ commands, peer to peer, so no file has to be hosted at all.
 
 **Goals (v1)**
 - Upload audio, then video, once; files are stored in a single place.
-- Rooms: an owner invites other users; members can play the room's media.
+- Rooms joined with a **simple code, no accounts**: the host creates a room and shares its code; anyone
+  who enters it joins with just a display name and can play the room's media.
+- **Everything synced:** when anyone plays, pauses or seeks, everyone sees it and follows (§5).
 - Progressive streaming with seeking.
 - Synchronized playback in a room, within about 0.5 s between participants in different places.
 - Host the **entire finished application** for free, under the hard constraint below.
@@ -24,7 +27,8 @@ commands, peer to peer, so no file has to be hosted at all.
 **Non-goals (for now)**
 - Live broadcasting (webcam, screen sharing, live events). That requires different technology
   (WebRTC media servers, HLS live). This project synchronizes **on-demand files**.
-- Transcoding uploaded files into other formats (too CPU-heavy for free hosting).
+- Transcoding on a server (too CPU-heavy for free hosting). More advanced formats are a **future goal**,
+  converted in the user's own browser instead (§6).
 - Sample-accurate sync for several speakers in the **same physical room** (< 50 ms). That is a much
   harder problem than a remote watch party.
 - Large public audiences. The target is small groups (2 to 10 people per room).
@@ -49,7 +53,7 @@ commands, peer to peer, so no file has to be hosted at all.
 |---|---|---|
 | File storage | Files are written to the backend's **local disk** (`backend/data/uploads`). MongoDB Atlas only stores metadata (title, size, MIME type, owner). | Local disk is wiped on free hosting (see §7). |
 | Media types | Audio only, MIME whitelist, 25 MB maximum. | Video needs much larger files and another upload path. |
-| Sharing | Every query filters on `ownerId`: a user can only see their own tracks. | Needs rooms and membership. |
+| Sharing | Every query filters on `ownerId`: a user can only see their own tracks. Accounts (register, login, JWT) are required. | Needs rooms joined by code, **without accounts**. The account system is removed (phase 3.2). |
 | Streaming | The backend's `res.sendFile` already answers HTTP Range requests (`206 Partial Content`). **But** the frontend downloads the whole file as a Blob through `HttpClient`, because the JWT travels in the `Authorization` header and `<audio src>` / `<video src>` cannot send headers. | The media element needs a URL it can load directly. |
 | Real time | REST only. | Needs a real-time channel (WebSocket). |
 | Tests | `node --test` backend with mocked Mongoose, Vitest frontend. | Good base to extend. |
@@ -60,7 +64,7 @@ commands, peer to peer, so no file has to be hosted at all.
 
 ```text
   Browser (Angular)                   Node / Express API              Object storage (B2, S3 API)
- +-------------------+   REST + JWT   +----------------------+  signed  +------------------+
+ +-------------------+   room token   +----------------------+  signed  +------------------+
  | room page         | -------------> | auth, rooms, media   | -------> | media files      |
  | <audio>/<video>   | <--WebSocket-> | room state (sync)    |   URLs   |                  |
  +-------------------+   Socket.IO    +----------+-----------+          +--------^---------+
@@ -70,6 +74,12 @@ commands, peer to peer, so no file has to be hosted at all.
 ```
 
 - The API stores metadata and room state. Files live in object storage.
+- **No accounts.** The host creates a room and gets a short code (6 characters, for example `K7P2QX`,
+  without look-alike characters such as `0`/`O`). Others join with the code and a display name. The
+  server then gives each browser a signed **room token**, scoped to that room, which it uses for the API,
+  the WebSocket and media URLs. The host's browser also keeps a secret host token.
+- Media belongs to a **room**, not to a person. When a room has been inactive for a while (for example
+  24 h), it expires and its files are deleted from storage, which keeps the free 10 GB from filling up.
 - The browser streams **directly from storage** with a short-lived signed URL. The Node server never
   relays the media bytes, so it uses no bandwidth on the API host.
 - Sync messages travel through the server over a WebSocket. The server is the single source of truth.
@@ -79,14 +89,22 @@ commands, peer to peer, so no file has to be hosted at all.
 ```text
   Peer A (own copy of the file) <-- WebRTC DataChannel (sync messages) --> Peer B (own copy)
               ^                                                                    ^
-              +------------ signaling (PeerServer) + STUN / TURN ------------------+
+              +------------ signaling (no own server) + public STUN ---------------+
 ```
 
 - No upload: each user opens their own copy of the file in the browser.
 - Only small control messages travel between peers.
-- A small server is still required: **signaling** (peers must find each other before connecting) and
-  **STUN/TURN** (to get through home routers and firewalls; TURN relays traffic when a direct connection
-  is impossible). "Serverless" here means "no media server", not "no server at all".
+- **Goal: completely serverless.** The project runs no server at all for the P2P version: the Angular
+  app can be a static site (GitHub Pages or Render), and everything else happens between browsers. Same
+  room code as phase A, no accounts.
+- What WebRTC still needs, and how to get it without a server of our own:
+  - **Signaling** (the first messages that let two browsers find each other): through free public
+    infrastructure, for example the Trystero library, which meets peers with the room code over public
+    BitTorrent trackers or Nostr relays, no account. Fully manual fallback: peers copy-paste (or scan as
+    a QR code) a connection code to each other, with no server involved at all.
+  - **STUN** (each browser learns its public address): free public STUN servers, no account.
+  - **No TURN relay.** A relay is a server; without it, peers behind very strict networks (some
+    company or university Wi-Fi) cannot connect. Accepted limitation.
 - **Known limitation of the first P2P version:** one peer, the host, holds the room state. **When the host
   leaves, the room ends** for everyone, who must create or join a new room. Handing the room over to
   another peer (host migration) is planned later (phase 3.7).
@@ -131,8 +149,10 @@ Rules:
    - A participant who disconnects is removed from the waiting list immediately.
 6. **Autoplay.** Browsers block playback with sound until the user has interacted with the page. Every
    participant must click once ("Join room") before sync can start playback for them.
-7. **Everyone controls playback** (decision, §10). If two people seek at the same moment, the server keeps
-   the last command it received. Finer-grained control (host only, delegated control) may come later.
+7. **Everyone controls playback, and everyone follows** (decision, §10). When anyone plays, pauses or
+   seeks, every participant's player does the same, and a short notice shows who did it (for example
+   "Alex jumped to 12:34"). If two people seek at the same moment, the server keeps the last command it
+   received. Finer-grained control (host only, delegated control) may come later.
 8. **Late joiners** receive the current state as soon as they connect.
 
 ## 6. Media formats and file identity
@@ -156,6 +176,15 @@ Rules:
     offset slider. Hashing a multi-GB file in the browser needs incremental hashing (for example
     `hash-wasm`) or a fast fingerprint (size + hash of the first and last few MB), because
     `crypto.subtle.digest` needs the whole file in memory.
+- **Future: more advanced formats** (MKV, AVI, MOV, HEVC/H.265, FLAC, ...), without paying for a server:
+  convert in the user's own browser with `ffmpeg.wasm` (FFmpeg compiled to WebAssembly).
+  - *Remuxing* (changing only the container, for example MKV with H.264 inside → MP4) is fast.
+  - *Transcoding* (changing the codec, for example HEVC → H.264) is slow, especially for full films, and
+    runs on the user's CPU.
+  - Server version: the uploader's browser converts before uploading. P2P version: each user converts
+    their own copy, and matching (duration + type) compares the converted files.
+  - Some codecs, such as HEVC, play natively only on some devices; check support with
+    `MediaSource.isTypeSupported()` before converting.
 - Browsers cannot reopen a local file from its path after a reload. The user selects the file again for
   each session (the File System Access API can remember it, but only in Chromium browsers).
 
@@ -170,9 +199,9 @@ Re-check them before creating the accounts.
 | [MongoDB Atlas](https://www.mongodb.com/docs/atlas/reference/free-shared-limitations/) (free cluster) | Users, media metadata, rooms | No | 512 MB in total. Metadata only, never media files (GridFS). Paused after 30 days without any connection; resume it from the Atlas dashboard. |
 | [Backblaze B2](https://www.backblaze.com/cloud-storage/pricing) (free tier) | Media files (choice explained in §7.1) | No (private bucket) | 10 GB of storage. Per day: 1 GB of downloads and 2,500 download requests. S3-compatible: private bucket, presigned URLs, Range requests. |
 | GitHub Pages | Angular frontend (optional) | No | Static files only. Deep links such as `/rooms/abc` need a `404.html` fallback. The dev proxy (`proxy.conf.json`) does not exist in production, so the frontend needs an API base URL and the backend a CORS configuration. |
-| PeerServer (`peer` package inside the Express app) | P2P signaling (phase 3.6) | No (runs on Render) | Reuses the Render service; no extra account. The public PeerJS cloud server is a no-account fallback. |
+| Public signaling (for example Trystero over public BitTorrent trackers or Nostr relays) | P2P signaling (phase 3.6) | No account | Not run by the project. Fallback: manual copy-paste of connection codes, no server at all (§4). |
 | Google public STUN (`stun:stun.l.google.com:19302`) | P2P address discovery (phase 3.6) | No account | Enough for most home connections. |
-| TURN relay (for example [Metered](https://www.metered.ca/stun-turn) free tier) | P2P relay when a direct connection fails (phase 3.6) | No, at the time of writing | Small monthly allowance (500 MB advertised). Sync messages are tiny, so it is enough. If no card-free TURN remains, peers behind strict networks simply cannot join; accepted limitation. |
+| TURN relay | Not used | — | The P2P version is completely serverless (§4). Peers behind very strict networks cannot connect; accepted limitation. |
 
 Consequences:
 - The current upload code would lose every file on Render. **Storage must move to object storage
@@ -228,7 +257,7 @@ How the code uses it:
 - **Upload.** Audio (up to 25 MB): Node keeps receiving the upload with Multer and forwards it to B2
   (`@aws-sdk/lib-storage`), then saves the metadata. Video (phase 3.5): the browser uploads directly to B2
   with a presigned URL (this needs CORS rules on the bucket) and Node only records the metadata.
-- **Playback.** The API checks ownership or room membership, then returns a presigned GET URL
+- **Playback.** The API checks the room token (the file must belong to that room), then returns a presigned GET URL
   (`@aws-sdk/s3-request-presigner`) valid for at least the media's duration (presigned URLs last 7 days
   at most). The `<audio>` or `<video>` element loads it, and its Range requests go straight to B2.
 - **Delete.** `DeleteObject` together with the metadata, as `unlink` does today.
@@ -241,7 +270,7 @@ Living with the free limits:
   a generic `error` event, so the player should show "media temporarily unavailable" instead of failing
   silently. Never add a payment method to the B2 account: without one, B2 cannot bill anything.
 - When the free limits are too small, they are accepted, not bought off: keep files short, enforce
-  per-user quotas, and rely on phase 3.6, where every viewer plays their own local copy and storage
+  per-room quotas, and rely on phase 3.6, where every viewer plays their own local copy and storage
   bandwidth drops to zero.
 
 Sources: [B2 pricing](https://www.backblaze.com/cloud-storage/pricing),
@@ -377,7 +406,8 @@ In the service's **Settings**:
   cluster. `server.js` refuses to start without the database, so Render keeps restarting the service and
   the app is unreachable. Fix: resume the cluster in the Atlas dashboard; Render then starts normally.
 - **Demo account:** `server.js` creates `demo@example.com` / `Demo1234!`, a password published in the
-  README. Anyone can log in with it on the public deployment. Kept for now, for testing (decision, §10).
+  README. Anyone can log in with it on the public deployment. Kept for now, for testing (decision, §10);
+  it disappears with the account system in phase 3.2.
 
 Sources: [Render Blueprint reference](https://render.com/docs/blueprint-spec),
 [Render build filters](https://render.com/docs/build-filters),
@@ -385,8 +415,12 @@ Sources: [Render Blueprint reference](https://render.com/docs/blueprint-spec),
 
 ## 8. Security and privacy
 
-- **Access rule:** a user may stream a file only if they own it or belong to a room that contains it,
-  enforced on the server. This extends the existing `ownerId` filtering pattern.
+- **Access rule (no accounts):** knowing the room code is what grants access. A browser may stream a
+  file only with a room token for the room that contains it, checked on the server. This replaces the
+  current `ownerId` filtering.
+- **Room codes are short, so they must be hard to guess by brute force:** limit join attempts per IP
+  address, let rooms expire after inactivity, and let the host change the code if it leaks. Anyone with
+  the code can join; that is the intended trade-off of "no accounts".
 - **Media URLs:** short-lived and scoped to a single file. If the URL expires during playback, the next
   Range request fails and playback stops once the buffer is empty. The lifetime must cover the media
   duration plus a margin, or the client must refresh the URL.
@@ -395,12 +429,11 @@ Sources: [Render Blueprint reference](https://render.com/docs/blueprint-spec),
   download allowance (§7.1).
 - **Logs:** the current HTTP logger writes `req.originalUrl`, query string included. Tokens placed in URLs
   would land in the logs. Redact query strings before introducing signed URLs.
-- **WebSocket authentication:** verify the JWT during the handshake and check room membership on every
-  room event, not only on join.
-- **Invites:** random, unguessable, expirable and revocable codes.
+- **WebSocket authentication:** verify the room token during the handshake, and check on every room
+  event that it belongs to that room, not only on join. `JWT_SECRET` stays: it signs the room tokens.
 - **CORS:** `cors()` currently accepts every origin. Restrict it to the deployed frontend.
-- **Quotas:** a per-user storage limit and upload rate limiting. B2's free 10 GB and 1 GB of downloads
-  per day are shared by all users.
+- **Quotas:** a per-room storage limit, upload rate limiting per IP address, and rooms (with their files)
+  deleted after inactivity. B2's free 10 GB and 1 GB of downloads per day are shared by all rooms.
 - **Copyright:** not addressed for now; the project is too small (decision, §10). For later: letting users
   upload films or music and share them with others is distribution, which would need terms of use and a
   takedown process. The P2P mode where everyone uses their own copy avoids hosting content at all.
@@ -422,7 +455,7 @@ without them. They go through a normal pull request to `main`.
 | MongoDB Atlas | Production database name, network access for Render. | §7.2 |
 | Render | Sign up with GitHub, create the free web service from the dashboard, set the environment variables. | §7.2 |
 | Backblaze B2 | Account (EU region), private bucket, application key restricted to that bucket. Keep the keys in a password manager; they go into Render in phase 3.4. | §7.1 |
-| TURN relay | Not yet: create the account in phase 3.6, only if peers cannot connect directly. | §7 |
+| P2P services | Nothing to create: the P2P version uses public signaling and STUN without accounts, and no TURN relay. | §4, §7 |
 
 **Done when:** the current app runs at `https://<service>.onrender.com` (register, log in, upload and play
 a track), and no service has asked for a card. This requires the `app.js` and `server.js` changes listed
@@ -443,12 +476,12 @@ From here on, every phase ships through the step 2 pipeline: merged into `main` 
 | Phase | Content | Done when |
 |---|---|---|
 | 3.1 Groundwork | Generalize `Track` into `Media` (`kind: audio \| video`). Storage module with a local-disk implementation (§7.1). Short-lived media URLs. `<audio src>` loads the URL directly instead of a Blob. Redact URLs in logs. | The Network tab shows `206 Partial Content`, playback starts before the download finishes, seeking works, tests are updated and green. |
-| 3.2 Rooms | `Room` model (owner, members, media list, invite code). Create, join, leave. Members can stream the room's media. | User B streams a file uploaded by user A only after joining A's room; a non-member gets `404`. |
-| 3.3 Synced playback | Socket.IO on the Express server, room state, clock offset, commands, drift correction. | Two browsers with two accounts stay within 0.5 s through play, pause and seek; a late joiner starts at the right position. |
+| 3.2 Rooms | `Room` model (code, host token, participants with display names, media list, expiry). Create a room, join with the code, leave. Room tokens. Media belongs to the room. Remove the account system (register, login, profile, demo account). | Someone without an account joins with the code and streams the room's media; a wrong code or a token from another room gets `404`. |
+| 3.3 Synced playback | Socket.IO on the Express server, room state, clock offset, commands, drift correction, buffering rules, "who did what" notices. | Two browsers stay within 0.5 s through play, pause and seek; a seek by either one moves both; a late joiner starts at the right position. |
 | 3.4 Cloud storage | S3 implementation of the storage module for B2, presigned download URLs, `S3_*` variables added on Render. | Files survive a Render restart; reaching B2's daily limit shows a clear message. |
 | 3.5 Video | Video types and size limits, direct browser upload to B2 with presigned URLs (multipart for large files, bucket CORS rules), magic-byte check, `<video>` player UI. | A 300 MB MP4 uploads, streams and stays in sync for two viewers, within B2's free 1 GB a day. |
-| 3.6 P2P sync | PeerJS, local file picker, anonymous rooms with invite links, file matching on duration and type (§6), DataChannel sync reusing the phase 3.3 protocol. The room ends when the host leaves (§4). | Two peers with matching local files stay in sync without uploading anything to a server and without an account. |
-| 3.7 Optional | Host migration when the host leaves, P2P file transfer (WebTorrent-style), finer-grained playback control. | — |
+| 3.6 P2P sync (serverless) | WebRTC DataChannels with serverless signaling (public infrastructure such as Trystero, manual copy-paste fallback), public STUN, no TURN. Local file picker, same room codes, file matching on duration and type (§6), sync reusing the phase 3.3 protocol. The room ends when the host leaves (§4). | Two peers with matching local files stay in sync with no server run by the project, no upload and no account. |
+| 3.7 Future | More advanced formats converted in the browser with `ffmpeg.wasm` (§6), host migration when the host leaves, P2P file transfer (WebTorrent-style), finer-grained playback control. | — |
 
 Until phase 3.4, uploads live on Render's local disk and are lost on every restart. That is acceptable
 for demos of phases 3.1 to 3.3; if it becomes annoying, do phase 3.4 earlier.
@@ -466,11 +499,14 @@ for demos of phases 3.1 to 3.3; if it becomes annoying, do phase 3.4 earlier.
 | Forwarded playback URLs | Accepted for now (§8). |
 | Sync tolerance | **0.5 s** between participants. |
 | P2P file matching | **Very loose at first:** same duration and same file type only (§6). |
-| Accounts in the P2P version | **Anonymous rooms** with invite links. |
+| Accounts | **None, in both versions.** The host shares a simple room code; others join with it and a display name (§4). |
+| Seeking | **When one person seeks, everyone follows**, with a notice showing who did it (§5 rule 7). |
+| P2P architecture | **Completely serverless** in the future: no server run by the project (§4). |
+| Formats | Browser-native formats now; **more advanced formats in the future**, converted in the browser (§6). |
 | Self-hosting | **None for now.** Users do not host anything; everything the project hosts runs on free services (§2). |
 | Free limit reached (B2, Atlas, Render) | **Do nothing, or show an error message.** Never pay (§2). |
 | Copyright | **Nothing for now**, the project is too small (§8). |
-| Demo account (`demo@example.com`) | **Kept for now**, for testing (§7.2). |
+| Demo account (`demo@example.com`) | **Kept for now**, for testing (§7.2), until accounts are removed in phase 3.2. |
 
 **Still open (for later)**
 - Maximum room size. It drives the P2P topology: a full mesh (everyone connected to everyone) is fine
@@ -481,11 +517,11 @@ for demos of phases 3.1 to 3.3; if it becomes annoying, do phase 3.4 earlier.
 
 ## 11. Testing strategy
 
-- **Backend:** extend the `node --test` suites: room access rules (member vs non-member), media URL
+- **Backend:** extend the `node --test` suites: room access rules (right code vs wrong code, token from another room), media URL
   expiry, WebSocket events with a real Socket.IO client against `createApp()`.
 - **Sync logic:** put the expected-position and drift-correction math in pure functions with an
   injectable clock, so it can be unit tested without browsers.
-- **Manual:** two browsers with two accounts, DevTools network throttling on one of them. Test seek,
+- **Manual:** two browsers in the same room, DevTools network throttling on one of them. Test seek,
   pause while buffering, late join, reconnection after a network drop.
 - **P2P:** test across two different networks (home Wi-Fi + mobile hotspot) to find out whether TURN
   is needed.
@@ -506,4 +542,5 @@ for demos of phases 3.1 to 3.3; if it becomes annoying, do phase 3.4 earlier.
 - **Syncplay**: synchronizes local files played in mpv or VLC through a small server, and flags when
   participants' files differ. The closest existing tool to phase 3.6.
 - **Watch2Gether**, **Teleparty**: server-synchronized watch parties.
-- **PeerJS** documentation (https://peerjs.com/) and the official WebRTC samples.
+- **Trystero** (serverless WebRTC signaling over public infrastructure), **PeerJS**
+  (https://peerjs.com/), the official WebRTC samples, and **ffmpeg.wasm** for in-browser conversion.
