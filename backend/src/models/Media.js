@@ -7,11 +7,11 @@ import mongoose from "mongoose";
  */
 const schema = new mongoose.Schema(
   {
-    ownerId: {
+    // Un média appartient à un salon : seul un jeton de ce salon y donne accès.
+    roomId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      ref: "Room",
       required: true,
-      index: true,
     },
     kind: { type: String, required: true, enum: ["audio", "video"] },
     title: { type: String, required: true, trim: true, maxlength: 200 },
@@ -23,8 +23,8 @@ const schema = new mongoose.Schema(
   { timestamps: true },
 );
 
-// Cet index accélère la liste des médias d'un utilisateur triés par date.
-schema.index({ ownerId: 1, createdAt: -1 });
+// Cet index accélère la liste des médias d'un salon triés par date.
+schema.index({ roomId: 1, createdAt: -1 });
 
 /**
  * Convertit un document Mongoose en objet sûr pour le frontend.

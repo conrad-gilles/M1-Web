@@ -37,3 +37,20 @@ export const ALLOWED_MIME_TYPES = new Map([
   ["audio/mp4", "audio"],
   ["audio/x-m4a", "audio"],
 ]);
+
+// --- Salons ---------------------------------------------------------------
+
+// Alphabet des codes de salon, sans caractères qui se ressemblent (0/O, 1/I/L).
+export const ROOM_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+export const ROOM_CODE_LENGTH = 6;
+
+// Un salon inactif depuis cette durée expire ; ses fichiers sont supprimés.
+export const ROOM_TTL_MS = (Number(process.env.ROOM_TTL_HOURS) || 24) * 60 * 60 * 1000;
+
+// Le projet vise de petits groupes (2 à 10 personnes par salon).
+export const MAX_PARTICIPANTS = 10;
+
+// Quota par salon : le stockage gratuit est partagé entre tous les salons.
+export const MAX_MEDIA_PER_ROOM = 20;
+
+export const MAX_NAME_LENGTH = 30;

@@ -73,14 +73,12 @@ rm -rf node_modules package-lock.json
 npm install --legacy-peer-deps
 ```
 
-## 3. Log in
+## 3. Open a room
 
-Demo account:
-
-- email: `demo@example.com`
-- password: `Demo1234!`
-
-Or create an account through the sign-up page.
+There are no accounts anymore. On the home page, enter a display name and
+create a room, then share its 6-character code (or the room link). Others join
+with the code and a display name. Two tabs of the same browser are two
+participants, which is handy to test alone.
 
 ## 4. Stop the servers
 
@@ -107,5 +105,5 @@ http://localhost:4200
 | `Cannot read properties of null (reading 'edgesOut')` during `npm install` | npm/Arborist bug with peer deps | `rm -rf node_modules package-lock.json && npm install --legacy-peer-deps` |
 | Backend: `Échec de connexion à MongoDB` (MongoDB connection failed) | Wrong URI/password, or IP not allowed | Check `backend/.env`, check Atlas → Network Access → IP Access List |
 | Blank page or CORS/404 errors on `/api/...` | Backend not started, or `proxy.conf.json` misconfigured | Check that the backend is running on port 3000 and that `frontend-starter/proxy.conf.json` points to `http://localhost:3000` |
-| `401` on every request after a while | JWT token expired (lifetime: 2h) | Log in again; the app now automatically redirects to `/login` in this case |
+| Sent back to the home page with "Ce salon a été fermé ou a expiré" | The room was closed by its host, expired after 24 h without activity, or the room token expired | Create a new room or join again with the code |
 | Upload rejected with an error message | Unsupported format (only MP3, WAV, OGG, M4A) or file > 25 MB | Check the file you are using, try the ones in `frontend-starter/fichiers-audio-de-test/` |

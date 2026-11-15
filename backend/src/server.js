@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import { createApp } from "./app.js";
-import { User } from "./models/User.js";
+import { purgeExpiredRooms } from "./services/roomService.js";
+import { createStorage } from "./storage/index.js";
 
 // Le port et l'URI viennent de l'environnement du backend, jamais d'Angular.
 const port = process.env.PORT || 3000;
@@ -36,27 +37,22 @@ try {
   throw error;
 }
 
-try {
-  // Le compte de démonstration facilite les premiers tests des étudiants.
-  const demoEmail = "demo@example.com";
-  const demoExists = await User.exists({ email: demoEmail });
+const storage = createStorage();
 
-  if (!demoExists) {
-    const demoUser = await User.create({
-      name: "Demo",
-      email: demoEmail,
-      password: "Demo1234!",
-    });
-    console.log(`[startup] Compte de démonstration créé : ${demoUser.id}`);
-  } else {
-    console.log("[startup] Compte de démonstration déjà présent");
+/** Supprime les salons expirés ; une erreur ne doit pas arrêter le serveur. */
+async function purge() {
+  try {
+    await purgeExpiredRooms(storage);
+  } catch (error) {
+    console.error("[rooms] Échec du nettoyage des salons expirés", error);
   }
-} catch (error) {
-  console.error("[startup] Impossible de préparer le compte de démonstration", error);
-  throw error;
 }
 
-const server = createApp().listen(port, () => {
+await purge();
+// unref() : ce minuteur ne doit pas empêcher l'arrêt du processus.
+setInterval(purge, 60 * 60 * 1000).unref();
+
+const server = createApp({ storage }).listen(port, () => {
   console.log(`Guitar Practice Cloud API: http://localhost:${port}/api/health`);
 });
 

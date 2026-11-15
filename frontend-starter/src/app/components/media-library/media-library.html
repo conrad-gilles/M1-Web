@@ -1,0 +1,112 @@
+<section>
+  <div class="grid">
+    <article class="card">
+      <h2>Ajouter un média</h2>
+
+      <label>Titre<input [formControl]="title" /></label>
+      <label>
+        Fichier audio
+        <input
+          #fileInput
+          type="file"
+          accept="audio/*"
+          [disabled]="uploading()"
+          (change)="choose($event)"
+          [attr.aria-describedby]="fileError() ? 'file-error' : null"
+        />
+      </label>
+
+      @if (fileError()) {
+        <p id="file-error" class="message error" role="alert">{{ fileError() }}</p>
+      }
+
+      <button type="button" (click)="upload()" [disabled]="!file || uploading()">
+        {{ uploading() ? 'Envoi en cours…' : 'Envoyer' }}
+      </button>
+
+      @if (uploading()) {
+        <p class="message loading" role="status">Envoi du fichier, veuillez patienter…</p>
+        <!-- Sans attribut value, <progress> est indéterminée (taille totale inconnue). -->
+        <progress
+          [attr.value]="uploadPercent()"
+          max="100"
+          aria-label="Progression de l'envoi"
+          [attr.aria-valuetext]="uploadPercent() === null ? 'Envoi en cours' : uploadPercent() + ' %'"
+        ></progress>
+        @if (uploadPercent() !== null) {
+          <small>{{ uploadPercent() }} %</small>
+        }
+      }
+      @if (uploadError()) {
+        <p class="message error" role="alert">{{ uploadError() }}</p>
+      }
+      @if (uploadSuccess()) {
+        <p class="message success" role="status">{{ uploadSuccess() }}</p>
+      }
+    </article>
+
+    <article class="card">
+      <div class="row">
+        <h2>Médias du salon</h2>
+        <button type="button" (click)="load()" [disabled]="loading()">Actualiser</button>
+      </div>
+
+      @if (loading()) {
+        <p class="message loading" role="status">Chargement…</p>
+      }
+      @if (listError()) {
+        <p class="message error" role="alert">{{ listError() }}</p>
+      }
+
+      <label>
+        Filtrer par titre (page affichée)
+        <input
+          type="search"
+          [value]="filterText()"
+          (input)="filterText.set($any($event.target).value)"
+          placeholder="Rechercher un titre…"
+        />
+      </label>
+
+      <div class="media-list">
+        @for (track of visibleMedias(); track track.id) {
+          <div class="media-card" [class.playing]="activeMediaId() === track.id">
+            <div class="media-info">
+              <b>{{ track.title }}</b>
+              <small>{{ track.originalName }}</small>
+              <small
+                >{{ formatMimeType(track.mimeType) }} · {{ formatSize(track.size) }} · ajouté le
+                {{ formatDate(track.createdAt) }}</small
+              >
+              @if (activeMediaId() === track.id) {
+                <span class="badge" role="status">Dans le lecteur</span>
+              }
+            </div>
+            <div class="media-actions">
+              <button type="button" (click)="choosePlayback(track)" [attr.aria-label]="'Lire ' + track.title">▶</button>
+              <button
+                type="button"
+                class="danger"
+                (click)="remove(track)"
+                [disabled]="deletingId() !== null"
+                [attr.aria-label]="'Supprimer ' + track.title"
+              >
+                {{ deletingId() === track.id ? 'Suppression…' : 'Supprimer' }}
+              </button>
+            </div>
+          </div>
+        } @empty {
+          @if (!loading()) {
+            <p>{{ filterText().trim() ? 'Aucun média ne correspond à ce filtre sur cette page.' : 'Aucun média pour l’instant : ajoutez-en un.' }}</p>
+          }
+        }
+      </div>
+
+      <nav class="pager" aria-label="Navigation entre les pages des médias">
+        <button type="button" (click)="go(page() - 1)" [disabled]="isFirstPage() || loading()">Précédent</button>
+        <span aria-live="polite">Page {{ page() }} / {{ pages() }}</span>
+        <button type="button" (click)="go(page() + 1)" [disabled]="isLastPage() || loading()">Suivant</button>
+      </nav>
+    </article>
+  </div>
+</section>

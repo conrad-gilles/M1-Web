@@ -1,0 +1,63 @@
+<section>
+  <div class="hero">
+    <p class="eyebrow">WATCH PARTY</p>
+    <h1>Le même média, au même instant</h1>
+    <p>Créez un salon, partagez son code : tout le monde suit la même lecture. Aucun compte.</p>
+  </div>
+
+  @if (roomClosed) {
+    <p class="message info" role="status">Ce salon a été fermé ou a expiré.</p>
+  }
+  @if (session(); as current) {
+    <p class="message info">
+      Vous êtes dans le salon <b>{{ current.code }}</b>.
+      <a [routerLink]="['/rooms', current.code]">Y retourner</a>
+    </p>
+  }
+
+  <div class="grid">
+    <article class="card">
+      <h2>Créer un salon</h2>
+      <form [formGroup]="createForm" (ngSubmit)="create()">
+        <label>
+          Votre nom
+          <input formControlName="name" maxlength="30" autocomplete="nickname" />
+        </label>
+        <button type="submit" [disabled]="createForm.invalid || pending() !== null">
+          {{ pending() === 'create' ? 'Création…' : 'Créer un salon' }}
+        </button>
+      </form>
+      @if (createError()) {
+        <p class="message error" role="alert">{{ createError() }}</p>
+      }
+    </article>
+
+    <article class="card">
+      <h2>Rejoindre un salon</h2>
+      <form [formGroup]="joinForm" (ngSubmit)="join()">
+        <label>
+          Code du salon
+          <input
+            class="code"
+            formControlName="code"
+            maxlength="6"
+            placeholder="K7P2QX"
+            autocomplete="off"
+            autocapitalize="characters"
+            spellcheck="false"
+          />
+        </label>
+        <label>
+          Votre nom
+          <input formControlName="name" maxlength="30" autocomplete="nickname" />
+        </label>
+        <button type="submit" [disabled]="joinForm.invalid || pending() !== null">
+          {{ pending() === 'join' ? 'Entrée…' : 'Rejoindre le salon' }}
+        </button>
+      </form>
+      @if (joinError()) {
+        <p class="message error" role="alert">{{ joinError() }}</p>
+      }
+    </article>
+  </div>
+</section>

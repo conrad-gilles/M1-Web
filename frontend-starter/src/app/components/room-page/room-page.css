@@ -1,0 +1,76 @@
+:host { display: block; }
+
+.code {
+  margin: 0.2rem 0;
+  font-family: ui-monospace, monospace;
+  font-size: clamp(2rem, 8vw, 3.2rem);
+  letter-spacing: 0.3em;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.actions button {
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+.actions .danger {
+  background: #b3261e;
+  border-color: #b3261e;
+}
+
+.card {
+  margin-bottom: 1rem;
+}
+
+.participants ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.participants li {
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  background: #e6f0ec;
+}
+
+.badge {
+  margin-left: 0.3rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  color: #fff;
+  background: #1d755e;
+}
+
+.message {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.message.error {
+  background: #fdecea;
+  color: #611a15;
+}
+
+audio,
+video {
+  width: 100%;
+  margin-top: 0.5rem;
+}
+
+video {
+  max-height: 60vh;
+  background: #000;
+  border-radius: 0.5rem;
+}

@@ -7,24 +7,40 @@ import { FRONTEND_DIST } from "./config.js";
 import { httpLogger } from "./middleware/httpLogger.js";
 import { UNSUPPORTED_FORMAT } from "./middleware/upload.js";
 import { mediaRoutes } from "./routes/mediaRoutes.js";
-import { userRoutes } from "./routes/userRoutes.js";
+import { roomRoutes } from "./routes/roomRoutes.js";
 import { createStorage } from "./storage/index.js";
 
 /**
  * Construit l'application Express sans ouvrir de port.
  * Cette séparation permet au serveur réel et aux tests de créer la même
  * application. Le port est ouvert uniquement dans server.js. Les tests
- * peuvent injecter un autre stockage ou un autre dossier de build.
+ * peuvent injecter un autre stockage, un autre dossier de build ou d'autres
+ * limites de fréquence.
  */
-export function createApp({ frontendDir = FRONTEND_DIST, storage = createStorage() } = {}) {
+export function createApp({
+  frontendDir = FRONTEND_DIST,
+  storage = createStorage(),
+  limits,
+} = {}) {
   const app = express();
 
   app.use(httpLogger);
 
-  // CORS est nécessaire pour que le frontend Angular puisse appeler l'API
-  // depuis une autre origine. Dans un vrai projet, il est recommandé de
-  // limiter les origines autorisées.
-  app.use(cors());
+  // Derrière le proxy de Render, l'adresse du client est dans X-Forwarded-For.
+  // Elle sert à limiter les tentatives par adresse IP.
+  if (process.env.TRUST_PROXY) {
+    app.set("trust proxy", Number(process.env.TRUST_PROXY) || 1);
+  }
+
+  // Le frontend et l'API partagent la même origine (proxy `ng serve` en
+  // développement, build servi par Express en production) : CORS est donc
+  // fermé par défaut. CORS_ORIGIN n'ouvre l'API qu'à un frontend hébergé
+  // ailleurs (par exemple GitHub Pages).
+  if (process.env.CORS_ORIGIN) {
+    const origins = process.env.CORS_ORIGIN.split(",").map((origin) => origin.trim());
+    console.log(`[startup] CORS autorisé pour : ${origins.join(", ")}`);
+    app.use(cors({ origin: origins }));
+  }
 
   // Transforme un corps JSON en objet JavaScript accessible via req.body.
   app.use(express.json());
@@ -35,7 +51,7 @@ export function createApp({ frontendDir = FRONTEND_DIST, storage = createStorage
     res.json({ status: "ok" });
   });
 
-  app.use("/api", userRoutes());
+  app.use("/api/rooms", roomRoutes({ storage, limits }));
   app.use("/api/media", mediaRoutes({ storage }));
 
   // Une route /api inconnue répond en JSON : elle ne doit jamais recevoir la

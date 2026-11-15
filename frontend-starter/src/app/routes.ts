@@ -1,15 +1,10 @@
 import { Routes } from '@angular/router';
-import { authGuard } from './shared/guards/auth.guard';
-import { LoginPageComponent } from './components/login-page/login-page';
-import { ProfilePageComponent } from './components/profile-page/profile-page';
-import { RegisterPageComponent } from './components/register-page/register-page';
-import { TracksPageComponent } from './components/tracks-page/tracks-page';
+import { HomePageComponent } from './components/home-page/home-page';
+import { RoomPageComponent } from './components/room-page/room-page';
+import { roomGuard } from './shared/guards/room.guard';
 
 export const routes: Routes = [
-  { path: '', pathMatch: 'full', redirectTo: 'tracks' },
-  { path: 'login', component: LoginPageComponent },
-  { path: 'register', component: RegisterPageComponent },
-  { path: 'profile', component: ProfilePageComponent, canActivate: [authGuard] },
-  { path: 'tracks', component: TracksPageComponent, canActivate: [authGuard] },
-  { path: '**', redirectTo: 'tracks' },
+  { path: '', pathMatch: 'full', component: HomePageComponent },
+  { path: 'rooms/:code', component: RoomPageComponent, canActivate: [roomGuard] },
+  { path: '**', redirectTo: '' },
 ];

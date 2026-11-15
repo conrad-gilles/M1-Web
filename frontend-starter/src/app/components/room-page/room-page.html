@@ -1,0 +1,59 @@
+<section>
+  <div class="hero">
+    <p class="eyebrow">CODE DU SALON</p>
+    <h1 class="code" aria-label="Code du salon">{{ code() }}</h1>
+    <p>Partagez ce code ou le lien : toute personne qui l’a peut rejoindre le salon.</p>
+    <div class="actions">
+      <button type="button" (click)="copyLink()">Copier le lien</button>
+      <button type="button" (click)="leave()" [disabled]="busy()">Quitter</button>
+      @if (isHost()) {
+        <button type="button" (click)="changeCode()" [disabled]="busy()">Changer le code</button>
+        <button type="button" class="danger" (click)="closeRoom()" [disabled]="busy()">Fermer le salon</button>
+      }
+    </div>
+  </div>
+
+  @if (loadError()) {
+    <p class="message error" role="alert">{{ loadError() }}</p>
+  }
+
+  <article class="card participants">
+    <div class="row">
+      <h2>Participants ({{ room()?.participants?.length ?? 0 }})</h2>
+      <button type="button" (click)="refresh()">Actualiser</button>
+    </div>
+    <ul>
+      @for (participant of room()?.participants ?? []; track participant.id) {
+        <li>
+          {{ participant.name }}
+          @if (participant.id === session()?.participant?.id) {
+            <span class="badge">vous</span>
+          }
+        </li>
+      }
+    </ul>
+  </article>
+
+  <article class="card player">
+    <h2>Lecteur</h2>
+    @if (current(); as media) {
+      <p class="now-playing" role="status">Lecture : <b>{{ media.title }}</b></p>
+      @if (media.kind === 'video') {
+        <video [src]="mediaUrl()" controls autoplay (error)="onPlaybackError()"></video>
+      } @else {
+        <audio [src]="mediaUrl()" controls autoplay (error)="onPlaybackError()"></audio>
+      }
+    } @else {
+      <p>Choisissez un média ci-dessous pour le lire.</p>
+    }
+    @if (playerError()) {
+      <p class="message error" role="alert">{{ playerError() }}</p>
+    }
+  </article>
+
+  <app-media-library
+    [activeMediaId]="current()?.id ?? null"
+    (selected)="play($event)"
+    (removed)="onMediaRemoved($event)"
+  />
+</section>

@@ -1,8 +1,8 @@
 import { Router } from "express";
 import fsPromises from "node:fs/promises";
 import mongoose from "mongoose";
-import { ALLOWED_MIME_TYPES, MEDIA_URL_TTL_SECONDS } from "../config.js";
-import { auth } from "../middleware/auth.js";
+import { ALLOWED_MIME_TYPES, MAX_MEDIA_PER_ROOM, MEDIA_URL_TTL_SECONDS } from "../config.js";
+import { roomAuth } from "../middleware/roomAuth.js";
 import { upload } from "../middleware/upload.js";
 import { Media } from "../models/Media.js";
 
@@ -31,21 +31,23 @@ async function discardTempFile(file) {
 }
 
 /**
- * Routes des médias. Flux d'un upload : multipart/form-data -> Multer
+ * Routes des médias d'un salon. Chaque requête est filtrée sur le salon du
+ * jeton (`req.room.id`) : un jeton d'un autre salon ne trouve rien (404).
+ * Flux d'un upload : multipart/form-data -> Multer
  * (dossier temporaire, taille et type contrôlés) -> module de stockage ->
  * métadonnées dans MongoDB.
  */
 export function mediaRoutes({ storage }) {
   const router = Router();
 
-  /** Retourne une page des médias appartenant à l'utilisateur. */
-  router.get("/", auth, async (req, res, next) => {
+  /** Retourne une page des médias du salon. */
+  router.get("/", roomAuth, async (req, res, next) => {
     try {
       const page = Math.max(1, Number(req.query.page) || 1);
       const limit = Math.min(20, Math.max(1, Number(req.query.limit) || 5));
-      const filter = { ownerId: req.auth.sub };
+      const filter = { roomId: req.room.id };
 
-      console.log(`[media] Lecture page=${page}, limit=${limit}, user=${req.auth.sub}`);
+      console.log(`[media] Lecture page=${page}, limit=${limit}, salon=${req.room.id}`);
 
       // La page demandée et le total sont lus en parallèle.
       const [items, total] = await Promise.all([
@@ -53,13 +55,13 @@ export function mediaRoutes({ storage }) {
           .sort({ createdAt: -1 })
           .skip((page - 1) * limit)
           .limit(limit)
-          .select("-storageKey -ownerId")
+          .select("-storageKey -roomId")
           .lean(),
         Media.countDocuments(filter),
       ]);
 
       // L'identifiant MongoDB (_id) devient `id`, plus simple côté frontend.
-      const publicItems = items.map(({ _id, __v, updatedAt, ...media }) => ({
+      const publicItems = items.map(({ _id, __v, updatedAt, storageKey, roomId, ...media }) => ({
         id: String(_id),
         ...media,
       }));
@@ -79,12 +81,20 @@ export function mediaRoutes({ storage }) {
   });
 
   /** Reçoit le champ multipart `file` et le champ texte `title`. */
-  router.post("/", auth, upload.single("file"), async (req, res, next) => {
+  router.post("/", roomAuth, upload.single("file"), async (req, res, next) => {
     let stored = false;
     try {
       if (!req.file) {
-        console.warn(`[media] Upload sans fichier par ${req.auth.sub}`);
+        console.warn(`[media] Upload sans fichier dans le salon ${req.room.id}`);
         return res.status(400).json({ message: "Fichier requis" });
+      }
+
+      if ((await Media.countDocuments({ roomId: req.room.id })) >= MAX_MEDIA_PER_ROOM) {
+        console.warn(`[media] Quota atteint dans le salon ${req.room.id}`);
+        await discardTempFile(req.file);
+        return res.status(409).json({
+          message: `Salon plein : ${MAX_MEDIA_PER_ROOM} médias maximum`,
+        });
       }
 
       const key = req.file.filename;
@@ -92,7 +102,7 @@ export function mediaRoutes({ storage }) {
       stored = true;
 
       const media = await Media.create({
-        ownerId: req.auth.sub,
+        roomId: req.room.id,
         kind: ALLOWED_MIME_TYPES.get(req.file.mimetype),
         title: req.body.title || req.file.originalname,
         originalName: req.file.originalname,
@@ -120,15 +130,15 @@ export function mediaRoutes({ storage }) {
   });
 
   /**
-   * Fournit une URL de lecture temporaire. <audio src> ne peut pas envoyer
+   * Fournit une URL de lecture temporaire à un participant du salon. <audio src> ne peut pas envoyer
    * d'en-tête Authorization : le navigateur charge donc cette URL signée, et
    * le lecteur diffuse le fichier par morceaux (requêtes Range).
    */
-  router.get("/:id/url", auth, validId, async (req, res, next) => {
+  router.get("/:id/url", roomAuth, validId, async (req, res, next) => {
     try {
       const media = await Media.findOne({
         _id: req.params.id,
-        ownerId: req.auth.sub,
+        roomId: req.room.id,
       }).select("+storageKey");
 
       if (!media) {
@@ -187,11 +197,11 @@ export function mediaRoutes({ storage }) {
   });
 
   /** Supprime la métadonnée et le fichier correspondant. */
-  router.delete("/:id", auth, validId, async (req, res, next) => {
+  router.delete("/:id", roomAuth, validId, async (req, res, next) => {
     try {
       const media = await Media.findOneAndDelete({
         _id: req.params.id,
-        ownerId: req.auth.sub,
+        roomId: req.room.id,
       }).select("+storageKey");
 
       if (!media) {

@@ -40,8 +40,9 @@ npm install
 npm start
 ```
 
-Ouvrir `http://localhost:4200`. Le compte de démonstration est
-`demo@example.com` / `Demo1234!`.
+Ouvrir `http://localhost:4200`. Il n'y a pas de compte : créer un salon avec un
+nom d'affichage, puis partager son code (ou son lien) pour que d'autres le
+rejoignent. Deux onglets du même navigateur comptent comme deux participants.
 
 ## Documents de travail
 
