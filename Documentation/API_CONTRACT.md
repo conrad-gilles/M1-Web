@@ -4,6 +4,9 @@ Base : `/api`. Il n'y a **pas de comptes** : l'accès repose sur le code d'un
 salon. Créer ou rejoindre un salon renvoie un **jeton de salon**, à envoyer
 ensuite dans `Authorization: Bearer <jeton>`.
 
+La lecture synchronisée passe par un WebSocket (Socket.IO), authentifié par le
+même jeton de salon : voir [SYNC_PROTOCOL.md](SYNC_PROTOCOL.md).
+
 MongoDB conserve les salons et les métadonnées des médias ; les octets des
 fichiers sont confiés au module de stockage du backend (`backend/src/storage/`,
 disque local pour l'instant).
@@ -44,9 +47,10 @@ qu'à son propre salon et à ses médias.
   `kind` égal à `"audio"` ou `"video"`.
 - `Page<Media>` : `{ items, page, limit, total, pages }`. `page` vaut au moins 1,
   `limit` est compris entre 1 et 20 (5 par défaut).
-- `MediaUrl` : `{ url, expiresAt }`. `url` est une URL temporaire limitée à ce
-  média (6 h par défaut, variable `MEDIA_URL_TTL_SECONDS`), à placer directement
-  dans `<audio src>` ou `<video src>`.
+- `MediaUrl` : `{ url, expiresAt, media }`. `url` est une URL temporaire limitée
+  à ce média (6 h par défaut, variable `MEDIA_URL_TTL_SECONDS`), à placer
+  directement dans `<audio src>` ou `<video src>`. `media` est le `Media`
+  correspondant.
 - Formats acceptés à l'upload : MP3, WAV, OGG et M4A, 25 Mo maximum.
 
 ## Règles des salons
@@ -60,7 +64,9 @@ qu'à son propre salon et à ses médias.
   participant.
 - **Expiration.** Un salon inactif depuis 24 h (variable `ROOM_TTL_HOURS`) est
   refusé puis supprimé avec ses fichiers.
-- **Limites.** 10 participants par salon, 20 médias par salon. Par adresse IP :
+- **Limites.** 10 participants par salon (quand le salon est plein, les
+  participants entrés depuis plus de 2 minutes et non connectés au WebSocket
+  cèdent leur place), 20 médias par salon. Par adresse IP :
   10 codes erronés par tranche de 10 minutes, 10 créations de salon par heure.
 
 ## Lecture en streaming

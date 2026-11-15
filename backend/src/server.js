@@ -1,5 +1,7 @@
+import http from "node:http";
 import mongoose from "mongoose";
 import { createApp } from "./app.js";
+import { attachRealtime } from "./realtime.js";
 import { purgeExpiredRooms } from "./services/roomService.js";
 import { createStorage } from "./storage/index.js";
 
@@ -52,8 +54,12 @@ await purge();
 // unref() : ce minuteur ne doit pas empêcher l'arrêt du processus.
 setInterval(purge, 60 * 60 * 1000).unref();
 
-const server = createApp({ storage }).listen(port, () => {
-  console.log(`Guitar Practice Cloud API: http://localhost:${port}/api/health`);
+// Express et Socket.IO partagent le même serveur HTTP, donc le même port.
+const server = http.createServer(createApp({ storage }));
+attachRealtime(server);
+
+server.listen(port, () => {
+  console.log(`Sharing Platform API: http://localhost:${port}/api/health`);
 });
 
 // Le callback `error` couvre notamment un port déjà utilisé.

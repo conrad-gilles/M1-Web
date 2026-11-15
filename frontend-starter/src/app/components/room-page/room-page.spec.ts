@@ -7,7 +7,10 @@ import { MatSnackBar } from '@angular/material/snack-bar';
 import { Media } from '../../shared/models/media.model';
 import { Room } from '../../shared/models/room.model';
 import { RoomSessionService } from '../../shared/services/room-session.service';
+import { SYNC_SOCKET_FACTORY } from '../../shared/services/sync.service';
+import { FakeSyncSocket } from '../../shared/testing/fake-sync-socket';
 import { MediaLibraryComponent } from '../media-library/media-library';
+import { SyncPlayerComponent } from '../sync-player/sync-player';
 import { RoomPageComponent } from './room-page';
 
 /** Remplace la bibliothèque : ses requêtes HTTP sont testées dans son propre spec. */
@@ -16,6 +19,12 @@ class MediaLibraryStubComponent {
   readonly activeMediaId = input<string | null>(null);
   readonly selected = output<Media>();
   readonly removed = output<Media>();
+}
+
+/** Remplace le lecteur synchronisé, testé dans son propre spec. */
+@Component({ selector: 'app-sync-player', template: '' })
+class SyncPlayerStubComponent {
+  readonly mediaChange = output<Media | null>();
 }
 
 const room = (code = 'K7P2QX'): Room => ({
@@ -44,6 +53,8 @@ describe('RoomPageComponent', () => {
   let navigate: ReturnType<typeof vi.fn>;
   let snackBar: { open: ReturnType<typeof vi.fn> };
   let confirmSpy: ReturnType<typeof vi.spyOn>;
+  let socket: FakeSyncSocket;
+  let socketTokens: string[];
 
   const element = () => fixture.nativeElement as HTMLElement;
 
@@ -61,21 +72,30 @@ describe('RoomPageComponent', () => {
     fixture.detectChanges();
   };
 
+  /** Le WebSocket reçoit l'état initial : la page passe « en ligne ». */
+  const goOnline = (participants = room().participants) => {
+    socket.receive('room:state', { version: 0, playback: null, waitingFor: [], participants, serverTime: Date.now() });
+    fixture.detectChanges();
+  };
+
   beforeEach(() => {
     sessionStorage.clear();
     navigate = vi.fn().mockResolvedValue(true);
     snackBar = { open: vi.fn() };
     confirmSpy = vi.spyOn(globalThis, 'confirm').mockReturnValue(true);
+    socket = new FakeSyncSocket();
+    socketTokens = [];
     TestBed.configureTestingModule({
       providers: [
+        { provide: SYNC_SOCKET_FACTORY, useValue: (token: string) => (socketTokens.push(token), socket) },
         provideHttpClient(),
         provideHttpClientTesting(),
         { provide: Router, useValue: { navigate } },
         { provide: MatSnackBar, useValue: snackBar },
       ],
     }).overrideComponent(RoomPageComponent, {
-      remove: { imports: [MediaLibraryComponent] },
-      add: { imports: [MediaLibraryStubComponent] },
+      remove: { imports: [MediaLibraryComponent, SyncPlayerComponent] },
+      add: { imports: [MediaLibraryStubComponent, SyncPlayerStubComponent] },
     });
     http = TestBed.inject(HttpTestingController);
   });
@@ -158,53 +178,108 @@ describe('RoomPageComponent', () => {
     expect(TestBed.inject(RoomSessionService).session()).toBeNull();
   });
 
-  describe('lecteur', () => {
-    it("place l'URL signée dans <audio src> sans télécharger le fichier", () => {
+  describe('temps réel', () => {
+    it('ouvre le WebSocket avec le jeton de salon et le ferme en quittant la page', () => {
       create();
+      expect(socketTokens).toEqual(['jeton']);
 
-      component.play(media('a'));
-      const request = http.expectOne('/api/media/a/url');
-      expect(request.request.method).toBe('GET');
-      request.flush({ url: '/api/media/a/stream?token=t', expiresAt: '2026-11-15T20:00:00.000Z' });
-      fixture.detectChanges();
+      fixture.destroy();
 
-      expect(element().querySelector('audio')?.getAttribute('src')).toBe('/api/media/a/stream?token=t');
-      expect(element().querySelector('video')).toBeNull();
-      expect(element().querySelector('.now-playing')?.textContent).toContain('Média a');
+      expect(socket.disconnected).toBe(true);
     });
 
-    it('utilise <video> pour un média vidéo', () => {
+    it('affiche les participants réellement connectés', () => {
       create();
 
-      component.play(media('v', 'video'));
-      http.expectOne('/api/media/v/url').flush({ url: '/api/media/v/stream?token=t', expiresAt: '' });
+      goOnline([{ id: 'p1', name: 'Alex' }]);
+      expect(element().querySelector('.participants h2')?.textContent).toContain('Participants connectés (1)');
+
+      socket.receive('room:participants', [
+        { id: 'p1', name: 'Alex' },
+        { id: 'p3', name: 'Lou' },
+      ]);
       fixture.detectChanges();
 
-      expect(element().querySelector('video')?.getAttribute('src')).toBe('/api/media/v/stream?token=t');
+      const names = Array.from(element().querySelectorAll('.participants li')).map((li) => li.textContent?.trim());
+      expect(names[1]).toBe('Lou');
     });
 
-    it("affiche le message du serveur quand l'URL est refusée", () => {
+    it('choisir un média le charge pour tout le salon, sans toucher au lecteur local', () => {
       create();
+      goOnline();
 
       component.play(media('a'));
-      http.expectOne('/api/media/a/url').flush({ message: 'Média inconnu' }, { status: 404, statusText: 'Not Found' });
+
+      expect(socket.sent('playback:command')[0][0]).toEqual({ type: 'load', mediaId: 'a' });
+      // http.verify() (afterEach) garantit qu'aucune URL de lecture n'est demandée ici
+    });
+
+    it('affiche le refus du serveur quand le média ne peut pas être chargé', async () => {
+      create();
+      goOnline();
+
+      component.play(media('a'));
+      socket.acknowledge('playback:command', { ok: false, message: 'Média inconnu' });
+      await Promise.resolve();
+
+      expect(snackBar.open).toHaveBeenCalledWith('Média inconnu', 'OK', expect.anything());
+    });
+
+    it('affiche une notice « qui a fait quoi » pour chaque changement de lecture', () => {
+      create();
+      goOnline();
+      const playback = { mediaId: 'a', paused: true, position: 754, rate: 1, updatedAt: 1_000_000, version: 1 };
+
+      socket.receive('playback:state', {
+        version: 1,
+        playback,
+        waitingFor: [],
+        action: 'seek',
+        by: { id: 'p2', name: 'Sam' },
+      });
+      socket.receive('playback:state', {
+        version: 2,
+        playback: { ...playback, version: 2 },
+        waitingFor: [],
+        action: 'pause',
+        by: { id: 'p1', name: 'Alex' },
+      });
+
+      expect(snackBar.open.mock.calls.map((call) => call[0])).toEqual([
+        'Sam est allé à 12:34',
+        'Vous avez mis en pause',
+      ]);
+    });
+
+    it('met en évidence dans la liste le média chargé dans le lecteur', () => {
+      create();
+
+      component.current.set(media('a'));
       fixture.detectChanges();
 
-      expect(component.current()).toBeNull();
-      expect(component.playerError()).toBe('Média inconnu');
-    });
-
-    it('arrête la lecture quand le média en cours est supprimé', () => {
-      create();
-      component.play(media('a'));
-      http.expectOne('/api/media/a/url').flush({ url: '/u', expiresAt: '' });
-
-      component.onMediaRemoved(media('b'));
       expect(component.current()?.id).toBe('a');
+    });
 
-      component.onMediaRemoved(media('a'));
-      expect(component.current()).toBeNull();
-      expect(component.mediaUrl()).toBe('');
+    it('suit un changement de code décidé par l’hôte', () => {
+      create();
+      goOnline();
+
+      socket.receive('room:updated', room('NEW234'));
+      fixture.detectChanges();
+
+      expect(element().querySelector('.code')?.textContent).toContain('NEW234');
+      expect(TestBed.inject(RoomSessionService).session()?.code).toBe('NEW234');
+      expect(navigate).toHaveBeenCalledWith(['/rooms', 'NEW234'], { replaceUrl: true });
+    });
+
+    it("revient à l'accueil quand le salon est fermé pour tout le monde", () => {
+      create();
+      goOnline();
+
+      socket.receive('room:closed');
+
+      expect(TestBed.inject(RoomSessionService).session()).toBeNull();
+      expect(navigate).toHaveBeenCalledWith(['/'], { queryParams: { closed: 1 } });
     });
   });
 });

@@ -1,0 +1,90 @@
+:host { display: block; }
+
+.card { margin-bottom: 1rem; }
+
+.status {
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  color: #1e4620;
+  background: #e6f4ea;
+}
+
+.status.offline {
+  color: #611a15;
+  background: #fdecea;
+}
+
+.now-playing { margin: 0.5rem 0; }
+
+video {
+  display: block;
+  width: 100%;
+  max-height: 60vh;
+  background: #000;
+  border-radius: 0.5rem;
+}
+
+.gesture {
+  display: block;
+  width: 100%;
+  margin: 0.75rem 0;
+  padding: 1rem;
+  font-size: 1rem;
+}
+
+.timeline,
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
+.timeline input { flex: 1; padding: 0; }
+
+.timeline span {
+  min-width: 3.2rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.controls { flex-wrap: wrap; }
+
+.controls .main { min-width: 8rem; }
+
+.local {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.local button {
+  color: #17312a;
+  background: #e6f0ec;
+}
+
+.local input { width: 6rem; padding: 0; }
+
+.message {
+  margin: 0.75rem 0 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.message.error {
+  background: #fdecea;
+  color: #611a15;
+}
+
+.message.error button {
+  margin-left: 0.5rem;
+  padding: 0.3rem 0.7rem;
+}
+
+.message.loading {
+  background: #eef2ff;
+  color: #1e2a5c;
+}

@@ -18,12 +18,9 @@
   }
 
   <article class="card participants">
-    <div class="row">
-      <h2>Participants ({{ room()?.participants?.length ?? 0 }})</h2>
-      <button type="button" (click)="refresh()">Actualiser</button>
-    </div>
+    <h2>{{ online() ? 'Participants connectés' : 'Participants' }} ({{ participants().length }})</h2>
     <ul>
-      @for (participant of room()?.participants ?? []; track participant.id) {
+      @for (participant of participants(); track participant.id) {
         <li>
           {{ participant.name }}
           @if (participant.id === session()?.participant?.id) {
@@ -34,26 +31,10 @@
     </ul>
   </article>
 
-  <article class="card player">
-    <h2>Lecteur</h2>
-    @if (current(); as media) {
-      <p class="now-playing" role="status">Lecture : <b>{{ media.title }}</b></p>
-      @if (media.kind === 'video') {
-        <video [src]="mediaUrl()" controls autoplay (error)="onPlaybackError()"></video>
-      } @else {
-        <audio [src]="mediaUrl()" controls autoplay (error)="onPlaybackError()"></audio>
-      }
-    } @else {
-      <p>Choisissez un média ci-dessous pour le lire.</p>
-    }
-    @if (playerError()) {
-      <p class="message error" role="alert">{{ playerError() }}</p>
-    }
-  </article>
+  <app-sync-player (mediaChange)="current.set($event)" />
 
   <app-media-library
     [activeMediaId]="current()?.id ?? null"
     (selected)="play($event)"
-    (removed)="onMediaRemoved($event)"
   />
 </section>

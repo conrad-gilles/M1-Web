@@ -314,6 +314,8 @@ test("le build Angular est servi, sans masquer les routes /api", async () => {
     const deep = await fetch(url + "/rooms/K7P2QX");
     assert.equal(deep.status, 200);
     assert.equal(await deep.text(), "<html>angular</html>");
+    // Un fichier absent n'est pas remplacé par la page HTML.
+    assert.equal((await fetch(url + "/rooms/main-absent.js")).status, 404);
     // L'API garde la priorité, y compris pour une route inconnue.
     assert.equal((await (await fetch(url + "/api/health")).json()).status, "ok");
     const unknown = await fetch(url + "/api/inconnue");

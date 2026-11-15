@@ -1,0 +1,104 @@
+<article class="card">
+  <div class="row">
+    <h2>Lecteur du salon</h2>
+    <span class="status" [class.offline]="!online()" role="status">{{ syncLabel() }}</span>
+  </div>
+
+  @if (media(); as current) {
+    <p class="now-playing">Lecture : <b>{{ current.title }}</b></p>
+
+    <!-- Pas d'attribut `controls` : les boutons ci-dessous envoient des
+         commandes au salon, et le lecteur applique l'état reçu en retour. -->
+    @if (current.kind === 'video') {
+      <video
+        #player
+        [src]="url()"
+        preload="auto"
+        playsinline
+        (loadedmetadata)="onLoadedMetadata()"
+        (timeupdate)="onTimeUpdate()"
+        (ended)="onEnded()"
+        (error)="onMediaError()"
+      ></video>
+    } @else {
+      <audio
+        #player
+        [src]="url()"
+        preload="auto"
+        (loadedmetadata)="onLoadedMetadata()"
+        (timeupdate)="onTimeUpdate()"
+        (ended)="onEnded()"
+        (error)="onMediaError()"
+      ></audio>
+    }
+
+    @if (needsGesture()) {
+      <button type="button" class="gesture" (click)="enableSound()">
+        ▶ Cliquer pour rejoindre la lecture du salon
+      </button>
+    }
+
+    <div class="timeline">
+      <span aria-hidden="true">{{ formatTime(shownPosition()) }}</span>
+      <input
+        type="range"
+        min="0"
+        step="0.1"
+        [max]="duration()"
+        [value]="shownPosition()"
+        [disabled]="!online() || duration() === 0"
+        (input)="onScrub($event)"
+        (change)="onScrubEnd($event)"
+        aria-label="Position dans le média (déplace tout le salon)"
+        [attr.aria-valuetext]="formatTime(shownPosition()) + ' sur ' + formatTime(duration())"
+      />
+      <span aria-hidden="true">{{ formatTime(duration()) }}</span>
+    </div>
+
+    <div class="controls">
+      <button type="button" (click)="skip(-10)" [disabled]="!online()" aria-label="Reculer de 10 secondes">−10 s</button>
+      <button type="button" class="main" (click)="togglePlay()" [disabled]="!online()">
+        {{ paused() ? '▶ Lecture' : '⏸ Pause' }}
+      </button>
+      <button type="button" (click)="skip(10)" [disabled]="!online()" aria-label="Avancer de 10 secondes">+10 s</button>
+
+      <span class="local">
+        <button type="button" (click)="toggleMute()" [attr.aria-pressed]="muted()">
+          {{ muted() ? 'Son coupé' : 'Son' }}
+        </button>
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.05"
+          [value]="volume()"
+          (input)="setVolume($event)"
+          aria-label="Volume (réglage local)"
+        />
+        @if (current.kind === 'video') {
+          <button type="button" (click)="fullscreen()">Plein écran</button>
+        }
+      </span>
+    </div>
+
+    @if (waitingFor().length > 0) {
+      <p class="message loading" role="status">
+        Le salon attend {{ waitingNames() }} (mise en mémoire tampon, 10 s au plus)…
+      </p>
+    }
+  } @else if (!error()) {
+    <p>
+      {{ state() ? 'Chargement du média…' : 'Choisissez un média ci-dessous : il sera lu pour tout le salon.' }}
+    </p>
+  }
+
+  @if (error()) {
+    <p class="message error" role="alert">
+      {{ error() }}
+      <button type="button" (click)="retry()">Réessayer</button>
+    </p>
+  }
+  @if (commandError()) {
+    <p class="message error" role="alert">{{ commandError() }}</p>
+  }
+</article>

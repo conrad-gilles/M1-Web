@@ -6,6 +6,7 @@ import {
   ROOM_TTL_MS,
   SECRET,
 } from "../config.js";
+import { roomEvents } from "../events.js";
 import { Media } from "../models/Media.js";
 import { Room } from "../models/Room.js";
 
@@ -54,7 +55,7 @@ export function signRoomToken(room, participant) {
 /**
  * Vérifie un jeton de salon (signature, expiration, usage) puis que le salon
  * existe encore et que le participant ne l'a pas quitté. Renvoie
- * `{ room, participant }`, ou null si l'accès doit être refusé.
+ * `{ room, participant, expiresAt }`, ou null si l'accès doit être refusé.
  */
 export async function openRoomSession(token) {
   let payload;
@@ -76,7 +77,11 @@ export async function openRoomSession(token) {
   }
 
   const participant = room.participants.find(({ id }) => id === payload.pid);
-  return { room, participant: { id: participant.id, name: participant.name } };
+  return {
+    room,
+    participant: { id: participant.id, name: participant.name },
+    expiresAt: payload.exp * 1000,
+  };
 }
 
 export function isExpired(room, now = Date.now()) {
@@ -96,6 +101,8 @@ export async function deleteRoom(roomId, storage) {
   }
   await Media.deleteMany({ roomId });
   await Room.deleteOne({ _id: roomId });
+  // Les participants encore connectés sont prévenus (voir realtime.js).
+  roomEvents.emit("room:closed", String(roomId));
   console.log(`[rooms] Salon supprimé : ${roomId} (${medias.length} média(s))`);
 }
 

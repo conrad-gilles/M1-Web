@@ -526,6 +526,44 @@ for demos of phases 3.1 to 3.3; if it becomes annoying, do phase 3.4 earlier.
 - **P2P:** test across two different networks (home Wi-Fi + mobile hotspot) to find out whether TURN
   is needed.
 
+## 11.1 Implementation status (branch `reese`, November 2026)
+
+Phases 3.1, 3.2 and 3.3 are implemented, together with the two backend changes of step 1 (§7.2) and
+the CI workflow of step 2. The account setup (Render, Atlas production database, Backblaze B2, branch
+protection) is still to do, as are phases 3.4 to 3.7.
+
+| Item | Where |
+|---|---|
+| Serve the Angular build, require `JWT_SECRET` | `backend/src/app.js`, `backend/src/server.js` |
+| CI workflow | `.github/workflows/ci.yml` |
+| 3.1 `Media` model, storage module (local disk), signed streaming URLs, redacted logs | `backend/src/models/Media.js`, `backend/src/storage/`, `backend/src/routes/mediaRoutes.js`, `backend/src/middleware/httpLogger.js` |
+| 3.2 Rooms, room tokens, host token, expiry, accounts removed | `backend/src/models/Room.js`, `backend/src/routes/roomRoutes.js`, `backend/src/services/roomService.js`, `backend/src/middleware/roomAuth.js` |
+| 3.3 Socket.IO, room state, buffering rules | `backend/src/realtime.js`, `backend/src/sync/` |
+| 3.3 Clock offset, drift correction, synced player, notices | `frontend-starter/src/app/shared/sync/`, `shared/services/sync.service.ts`, `components/sync-player/` |
+| HTTP contract, WebSocket protocol | `Documentation/API_CONTRACT.md`, `Documentation/SYNC_PROTOCOL.md` |
+
+Choices made while implementing, to review:
+
+- **Media URLs last 6 hours** (`MEDIA_URL_TTL_SECONDS`): the server does not know a media's duration.
+- **Room size: 10 participants, 20 media per room.** This settles the "maximum room size" open
+  question for now (§10).
+- **A closed tab does not leave the room.** When a room is full, participants who joined more than
+  2 minutes ago and are not connected to the WebSocket give up their place.
+- **Rate limits per IP address:** 10 wrong codes per 10 minutes, 10 rooms created per hour. Behind
+  Render's proxy, set `TRUST_PROXY=1` so the client address is used.
+- **CORS is closed by default** (same origin). `CORS_ORIGIN` opens it for a frontend hosted elsewhere.
+- **The room session lives in `sessionStorage`:** it survives a reload, and two tabs of one browser
+  are two participants. Closing the host's tab loses the host token.
+- **The player has no native controls:** buttons send commands, the player only applies the shared
+  state, so echo loops cannot happen (§5 rule 4).
+- **Loading a media leaves it paused at 0 s**; anyone then presses play.
+- **During a buffering wait:** pause cancels the automatic resume, play resumes at once, seek keeps
+  waiting (§5 rule 5 did not say).
+- **Upload formats are still audio only, 25 MB.** The player already uses `<video>` for video media;
+  video types and large uploads are phase 3.5.
+- **Existing data:** tracks and users created before these phases stay in their old MongoDB
+  collections and are no longer read.
+
 ## 12. Documentation to add as the project grows
 
 - `API_CONTRACT.md`: the new endpoints (rooms, media URLs) and the WebSocket events with their payloads.

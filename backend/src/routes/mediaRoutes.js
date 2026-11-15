@@ -1,6 +1,7 @@
 import { Router } from "express";
 import fsPromises from "node:fs/promises";
 import mongoose from "mongoose";
+import { roomEvents } from "../events.js";
 import { ALLOWED_MIME_TYPES, MAX_MEDIA_PER_ROOM, MEDIA_URL_TTL_SECONDS } from "../config.js";
 import { roomAuth } from "../middleware/roomAuth.js";
 import { upload } from "../middleware/upload.js";
@@ -112,6 +113,7 @@ export function mediaRoutes({ storage }) {
       });
 
       console.log(`[media] Upload enregistré : ${media.id}`);
+      roomEvents.emit("media:changed", req.room.id);
       res.status(201).json(media.toPublic());
     } catch (error) {
       console.error("[media] Erreur pendant l'enregistrement du média", error);
@@ -153,7 +155,7 @@ export function mediaRoutes({ storage }) {
         expiresInSeconds: MEDIA_URL_TTL_SECONDS,
       });
       console.log(`[media] URL de lecture émise pour ${media.id}`);
-      res.json(signed);
+      res.json({ ...signed, media: media.toPublic() });
     } catch (error) {
       console.error("[media] Erreur de préparation de l'URL de lecture", error);
       next(error);
@@ -215,12 +217,17 @@ export function mediaRoutes({ storage }) {
         // L'exception n'est volontairement pas ignorée : l'administrateur doit
         // voir ce fichier orphelin si sa suppression échoue.
         console.error(`[media] Fichier non supprimé : ${media.storageKey}`, error);
+        roomEvents.emit("media:removed", req.room.id, media.id);
+        roomEvents.emit("media:changed", req.room.id);
         return res.status(500).json({
           message: "Métadonnée supprimée, mais fichier non supprimé",
         });
       }
 
       console.log(`[media] Média supprimé : ${media.id}`);
+      // Le lecteur du salon se vide si ce média était en cours de lecture.
+      roomEvents.emit("media:removed", req.room.id, media.id);
+      roomEvents.emit("media:changed", req.room.id);
       res.status(204).end();
     } catch (error) {
       console.error("[media] Erreur de suppression", error);

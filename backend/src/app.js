@@ -70,7 +70,10 @@ export function createApp({
     app.use(express.static(frontendDir));
     // Toute autre requête GET reçoit index.html : c'est le routeur Angular qui
     // interprète ensuite l'URL.
-    app.get(/.*/, (_req, res, next) => {
+    app.get(/.*/, (req, res, next) => {
+      // Un fichier absent du build (script, image...) reste une erreur 404 :
+      // lui répondre par la page HTML masquerait le problème.
+      if (path.extname(req.path)) return next();
       res.sendFile(indexFile, (error) => {
         if (error) {
           console.error("[http] Erreur d'envoi de index.html", error);

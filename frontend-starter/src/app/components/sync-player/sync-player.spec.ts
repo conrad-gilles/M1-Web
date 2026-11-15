@@ -1,0 +1,592 @@
+import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { Media } from '../../shared/models/media.model';
+import { PlaybackState } from '../../shared/models/playback-state.model';
+import { SYNC_SOCKET_FACTORY, SyncService } from '../../shared/services/sync.service';
+import { FakeSyncSocket } from '../../shared/testing/fake-sync-socket';
+import { SyncPlayerComponent } from './sync-player';
+
+const NOW = 1_000_000;
+const SAM = { id: 'p2', name: 'Sam' };
+
+const media = (id = 'm1', kind: Media['kind'] = 'audio'): Media => ({
+  id,
+  kind,
+  title: `Média ${id}`,
+  originalName: `${id}.mp3`,
+  mimeType: 'audio/mpeg',
+  size: 2048,
+  createdAt: '2026-11-15T10:00:00.000Z',
+});
+
+const playback = (overrides: Partial<PlaybackState> = {}): PlaybackState => ({
+  mediaId: 'm1',
+  paused: true,
+  position: 0,
+  rate: 1,
+  updatedAt: NOW,
+  version: 1,
+  ...overrides,
+});
+
+/** État simulé d'un élément <audio>/<video> (jsdom ne lit aucun média). */
+interface FakeMediaState {
+  readyState: number;
+  duration: number;
+  paused: boolean;
+  ended: boolean;
+  currentTime: number;
+  playbackRate: number;
+  volume: number;
+  muted: boolean;
+}
+
+describe('SyncPlayerComponent', () => {
+  let fixture: ComponentFixture<SyncPlayerComponent>;
+  let component: SyncPlayerComponent;
+  let http: HttpTestingController;
+  let socket: FakeSyncSocket;
+  let element: HTMLMediaElement;
+  let fake: FakeMediaState;
+  let play: ReturnType<typeof vi.fn>;
+  let pause: ReturnType<typeof vi.fn>;
+  let version: number;
+
+  const host = () => fixture.nativeElement as HTMLElement;
+  const commands = () => socket.sent('playback:command').map((args) => args[0]);
+  const bufferEvents = () =>
+    socket.emitted.map((message) => message.event).filter((event) => event.startsWith('buffer:'));
+
+  /** Le serveur diffuse un nouvel état du salon. */
+  const receive = (state: PlaybackState | null, waitingFor: { id: string; name: string }[] = []) => {
+    version += 1;
+    socket.receive('playback:state', {
+      version,
+      playback: state ? { ...state, version } : null,
+      waitingFor,
+      action: 'play',
+      by: SAM,
+    });
+    fixture.detectChanges();
+  };
+
+  /** Remplace les propriétés du lecteur que jsdom n'implémente pas. */
+  const stubElement = (overrides: Partial<FakeMediaState> = {}) => {
+    element = host().querySelector('audio, video') as HTMLMediaElement;
+    fake = {
+      readyState: 4,
+      duration: 200,
+      paused: true,
+      ended: false,
+      currentTime: 0,
+      playbackRate: 1,
+      volume: 1,
+      muted: false,
+      ...overrides,
+    };
+    for (const key of Object.keys(fake) as (keyof FakeMediaState)[]) {
+      Object.defineProperty(element, key, {
+        configurable: true,
+        get: () => fake[key],
+        set: (value: never) => (fake[key] = value),
+      });
+    }
+    play = vi.fn(() => {
+      fake.paused = false;
+      return Promise.resolve();
+    });
+    pause = vi.fn(() => {
+      fake.paused = true;
+    });
+    element.play = play as unknown as HTMLMediaElement['play'];
+    element.pause = pause as unknown as HTMLMediaElement['pause'];
+  };
+
+  /**
+   * Met le composant en ligne, charge le média `m1` dans le salon, répond à la
+   * demande d'URL, puis simule un lecteur prêt (métadonnées chargées).
+   */
+  const loadMedia = (state = playback(), overrides: Partial<FakeMediaState> = {}, item = media()) => {
+    receive(state);
+    http.expectOne(`/api/media/${item.id}/url`).flush({
+      url: `/api/media/${item.id}/stream?token=t`,
+      expiresAt: '2026-11-15T20:00:00.000Z',
+      media: item,
+    });
+    fixture.detectChanges();
+    stubElement(overrides);
+    element.dispatchEvent(new Event('loadedmetadata'));
+    fixture.detectChanges();
+  };
+
+  /** Avance l'horloge : les ticks du lecteur (250 ms) se déclenchent. */
+  const advance = (ms: number) => {
+    vi.advanceTimersByTime(ms);
+    fixture.detectChanges();
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers({ now: NOW });
+    version = 0;
+    socket = new FakeSyncSocket();
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: SYNC_SOCKET_FACTORY, useValue: () => socket },
+      ],
+    });
+    http = TestBed.inject(HttpTestingController);
+    TestBed.inject(SyncService).connect('jeton');
+    socket.receive('room:state', { version: 0, playback: null, waitingFor: [], participants: [], serverTime: NOW });
+
+    fixture = TestBed.createComponent(SyncPlayerComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+  });
+
+  afterEach(() => {
+    fixture.destroy();
+    http.verify();
+    vi.useRealTimers();
+  });
+
+  describe('chargement du média', () => {
+    it('invite à choisir un média tant que le salon n’en a pas', () => {
+      expect(host().textContent).toContain('Choisissez un média ci-dessous');
+      expect(host().querySelector('audio, video')).toBeNull();
+    });
+
+    it('charge l’URL signée du média du salon dans un lecteur sans contrôles natifs', () => {
+      const changes: (Media | null)[] = [];
+      component.mediaChange.subscribe((value) => changes.push(value));
+
+      loadMedia();
+
+      expect(element.tagName).toBe('AUDIO');
+      expect(element.getAttribute('src')).toBe('/api/media/m1/stream?token=t');
+      // Sans `controls`, un clic ne peut pas piloter le lecteur hors du salon.
+      expect(element.hasAttribute('controls')).toBe(false);
+      expect(host().querySelector('.now-playing')?.textContent).toContain('Média m1');
+      expect(changes.map((value) => value?.id)).toEqual(['m1']);
+    });
+
+    it('utilise <video> pour un média vidéo', () => {
+      loadMedia(playback(), {}, media('m1', 'video'));
+
+      expect(element.tagName).toBe('VIDEO');
+    });
+
+    it('change de média quand le salon en charge un autre', () => {
+      loadMedia();
+
+      receive(playback({ mediaId: 'm2' }));
+      http.expectOne('/api/media/m2/url').flush({ url: '/u2', expiresAt: '', media: media('m2') });
+      fixture.detectChanges();
+
+      expect(host().querySelector('audio')?.getAttribute('src')).toBe('/u2');
+    });
+
+    it('ignore la réponse d’un média que le salon a déjà remplacé', () => {
+      receive(playback({ mediaId: 'm1' }));
+      const first = http.expectOne('/api/media/m1/url');
+      receive(playback({ mediaId: 'm2' }));
+      const second = http.expectOne('/api/media/m2/url');
+
+      second.flush({ url: '/u2', expiresAt: '', media: media('m2') });
+      first.flush({ url: '/u1', expiresAt: '', media: media('m1') });
+      fixture.detectChanges();
+
+      expect(component.media()?.id).toBe('m2');
+      expect(component.url()).toBe('/u2');
+    });
+
+    it('vide le lecteur quand le média en cours est supprimé', () => {
+      loadMedia();
+      const changes: (Media | null)[] = [];
+      component.mediaChange.subscribe((value) => changes.push(value));
+
+      receive(null);
+
+      expect(host().querySelector('audio')).toBeNull();
+      expect(changes).toEqual([null]);
+    });
+
+    it('affiche le message du serveur quand l’URL est refusée, et permet de réessayer', () => {
+      receive(playback());
+      http.expectOne('/api/media/m1/url').flush({ message: 'Média inconnu' }, { status: 404, statusText: 'Not Found' });
+      fixture.detectChanges();
+      expect(host().querySelector('[role="alert"]')?.textContent).toContain('Média inconnu');
+
+      component.retry();
+      http.expectOne('/api/media/m1/url').flush({ url: '/u', expiresAt: '', media: media() });
+      fixture.detectChanges();
+
+      expect(component.error()).toBe('');
+      expect(host().querySelector('audio')).not.toBeNull();
+    });
+
+    it('signale un média temporairement indisponible quand le lecteur échoue', () => {
+      loadMedia();
+
+      element.dispatchEvent(new Event('error'));
+      fixture.detectChanges();
+
+      expect(host().querySelector('[role="alert"]')?.textContent).toContain('Média temporairement indisponible');
+    });
+  });
+
+  describe('application de l’état partagé', () => {
+    it('en pause : se place à la position du salon sans lire', () => {
+      loadMedia(playback({ paused: true, position: 42 }));
+
+      expect(fake.currentTime).toBe(42);
+      expect(play).not.toHaveBeenCalled();
+    });
+
+    it('en lecture : lance le lecteur', () => {
+      loadMedia(playback({ paused: false }));
+
+      expect(play).toHaveBeenCalledOnce();
+    });
+
+    it('un arrivant tardif démarre à la position courante, pas au début', () => {
+      // La lecture a commencé il y a 20 s à la position 100.
+      loadMedia(playback({ paused: false, position: 100, updatedAt: NOW - 20_000 }));
+
+      expect(fake.currentTime).toBe(120);
+      expect(play).toHaveBeenCalledOnce();
+    });
+
+    it('tient compte du décalage d’horloge avec le serveur', () => {
+      // L'horloge du serveur avance de 5 s sur l'horloge locale.
+      TestBed.inject(SyncService).clockOffset.set(5000);
+
+      loadMedia(playback({ paused: false, position: 100, updatedAt: NOW }));
+
+      expect(fake.currentTime).toBe(105);
+    });
+
+    it('une pause du salon arrête le lecteur à la position diffusée', () => {
+      loadMedia(playback({ paused: false }));
+      fake.currentTime = 30.4;
+
+      receive(playback({ paused: true, position: 30 }));
+
+      expect(pause).toHaveBeenCalled();
+      expect(fake.paused).toBe(true);
+      expect(fake.currentTime).toBe(30);
+    });
+
+    it('un saut décidé par un autre participant déplace ce lecteur', () => {
+      loadMedia(playback({ paused: false }));
+
+      receive(playback({ paused: false, position: 150, updatedAt: NOW }));
+
+      expect(fake.currentTime).toBe(150);
+      expect(fake.paused).toBe(false);
+    });
+
+    it('ne dépasse jamais la durée du média', () => {
+      loadMedia(playback({ paused: true, position: 999 }), { duration: 200 });
+
+      expect(fake.currentTime).toBe(200);
+    });
+
+    it('attend les métadonnées avant d’appliquer l’état', () => {
+      receive(playback({ paused: true, position: 42 }));
+      http.expectOne('/api/media/m1/url').flush({ url: '/u', expiresAt: '', media: media() });
+      fixture.detectChanges();
+      stubElement({ readyState: 0 });
+      advance(1000);
+      expect(fake.currentTime).toBe(0);
+
+      fake.readyState = 4;
+      element.dispatchEvent(new Event('loadedmetadata'));
+
+      expect(fake.currentTime).toBe(42);
+    });
+  });
+
+  describe('commandes : pas de boucle d’écho', () => {
+    it('le bouton Lecture envoie une commande et ne touche pas au lecteur', () => {
+      loadMedia(playback({ paused: true }));
+
+      host().querySelector<HTMLButtonElement>('.controls .main')?.click();
+
+      expect(commands()).toEqual([{ type: 'play' }]);
+      expect(play).not.toHaveBeenCalled();
+      expect(fake.paused).toBe(true); // le lecteur attend l'état diffusé par le serveur
+    });
+
+    it('le bouton Pause envoie une commande pendant la lecture', () => {
+      loadMedia(playback({ paused: false }));
+
+      host().querySelector<HTMLButtonElement>('.controls .main')?.click();
+
+      expect(commands()).toEqual([{ type: 'pause' }]);
+    });
+
+    it('appliquer un état reçu ne renvoie aucune commande', () => {
+      loadMedia(playback({ paused: false }));
+
+      receive(playback({ paused: true, position: 30 }));
+      receive(playback({ paused: false, position: 90, updatedAt: NOW }));
+      for (const type of ['play', 'pause', 'seeking', 'seeked', 'timeupdate', 'waiting', 'playing']) {
+        element.dispatchEvent(new Event(type));
+      }
+      advance(3000);
+
+      expect(commands()).toEqual([]);
+    });
+
+    it('déplacer le curseur n’envoie le saut qu’au relâchement', () => {
+      loadMedia(playback({ paused: false }));
+      const slider = host().querySelector<HTMLInputElement>('.timeline input') as HTMLInputElement;
+
+      slider.value = '80';
+      slider.dispatchEvent(new Event('input'));
+      slider.value = '120';
+      slider.dispatchEvent(new Event('input'));
+      expect(commands()).toEqual([]);
+      expect(component.shownPosition()).toBe(120);
+
+      slider.dispatchEvent(new Event('change'));
+
+      expect(commands()).toEqual([{ type: 'seek', position: 120 }]);
+      expect(fake.currentTime).toBe(0); // le lecteur bougera avec l'état du serveur
+    });
+
+    it('±10 s part de la position attendue et reste dans le média', () => {
+      loadMedia(playback({ paused: true, position: 5 }));
+
+      component.skip(10);
+      component.skip(-10);
+      receive(playback({ paused: true, position: 195 }));
+      component.skip(10);
+
+      expect(commands()).toEqual([
+        { type: 'seek', position: 15 },
+        { type: 'seek', position: 0 },
+        { type: 'seek', position: 200 },
+      ]);
+    });
+
+    it('la fin du média est signalée une fois, avec la version de l’état', () => {
+      loadMedia(playback({ paused: false }));
+
+      element.dispatchEvent(new Event('ended'));
+
+      expect(commands()).toEqual([{ type: 'ended', version: 1, position: 200 }]);
+    });
+
+    it('affiche le refus d’une commande par le serveur', async () => {
+      loadMedia(playback({ paused: true }));
+
+      component.togglePlay();
+      socket.acknowledge('playback:command', { ok: false, message: 'Aucun média chargé' });
+      await Promise.resolve();
+      fixture.detectChanges();
+
+      expect(host().textContent).toContain('Aucun média chargé');
+    });
+
+    it('le volume et le son coupé restent locaux', () => {
+      loadMedia(playback({ paused: false }));
+
+      component.toggleMute();
+      const volume = host().querySelector<HTMLInputElement>('.local input') as HTMLInputElement;
+      volume.value = '0.4';
+      volume.dispatchEvent(new Event('input'));
+
+      expect(fake.muted).toBe(true);
+      expect(fake.volume).toBe(0.4);
+      expect(socket.emitted.filter((message) => message.event !== 'clock:ping')).toEqual([]);
+    });
+  });
+
+  describe('correction de la dérive (environ une fois par seconde)', () => {
+    /** Lecture commencée à NOW depuis 0 : la position attendue suit l'horloge. */
+    const playing = () => loadMedia(playback({ paused: false, position: 0, updatedAt: NOW }));
+
+    it('ne touche à rien sous 0,1 s d’écart', () => {
+      playing();
+      fake.currentTime = 0.95; // attendu : 1,0 après 1 s
+
+      advance(1000);
+
+      expect(fake.currentTime).toBe(0.95);
+      expect(fake.playbackRate).toBe(1);
+    });
+
+    it('accélère de 5 % quand le lecteur a entre 0,1 s et 1 s de retard, puis revient à la normale', () => {
+      playing();
+      fake.currentTime = 0.5; // attendu : 1,0 après 1 s
+
+      advance(1000);
+      expect(fake.playbackRate).toBe(1.05);
+      expect(fake.currentTime).toBe(0.5); // pas de saut
+
+      fake.currentTime = 1.99; // rattrapé : attendu 2,0 après 2 s
+      advance(1000);
+      expect(fake.playbackRate).toBe(1);
+    });
+
+    it('ralentit de 5 % quand le lecteur est en avance', () => {
+      playing();
+      fake.currentTime = 1.6;
+
+      advance(1000);
+
+      expect(fake.playbackRate).toBe(0.95);
+    });
+
+    it('saute à la bonne position au-delà de 1 s d’écart', () => {
+      playing();
+      fake.currentTime = 30;
+
+      advance(1000);
+
+      expect(fake.currentTime).toBe(1);
+      expect(fake.playbackRate).toBe(1);
+    });
+
+    it('relance le lecteur s’il a été arrêté en dehors du salon', () => {
+      playing();
+      fake.paused = true; // touche multimédia du clavier, par exemple
+      play.mockClear();
+
+      advance(1000);
+
+      expect(play).toHaveBeenCalledOnce();
+      expect(commands()).toEqual([]);
+    });
+
+    it('ne corrige rien quand le salon est en pause', () => {
+      loadMedia(playback({ paused: true, position: 10 }));
+
+      advance(5000);
+
+      expect(fake.currentTime).toBe(10);
+      expect(play).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('buffering', () => {
+    const playing = () => loadMedia(playback({ paused: false, position: 0, updatedAt: NOW }));
+
+    it('ignore un blocage de moins de 0,5 s', () => {
+      playing();
+
+      fake.readyState = 2;
+      advance(500);
+      fake.readyState = 4;
+      advance(2000);
+
+      expect(bufferEvents()).toEqual([]);
+    });
+
+    it('signale un blocage de plus de 0,5 s, une seule fois, puis sa fin', () => {
+      playing();
+
+      fake.readyState = 2;
+      advance(1000);
+      advance(3000);
+      expect(bufferEvents()).toEqual(['buffer:start']);
+      expect(host().querySelector('.status')?.textContent).toContain('Mise en mémoire tampon');
+
+      // Le serveur met le salon en pause pour nous attendre.
+      receive(playback({ paused: true, position: 0.8 }), [{ id: 'p1', name: 'Alex' }]);
+      expect(host().textContent).toContain('Le salon attend Alex');
+
+      fake.readyState = 4;
+      advance(250);
+      expect(bufferEvents()).toEqual(['buffer:start', 'buffer:end']);
+    });
+
+    it('ne saute pas pendant un blocage (cela relancerait le chargement)', () => {
+      playing();
+      fake.readyState = 2;
+
+      advance(5000);
+
+      expect(fake.currentTime).toBe(0);
+    });
+
+    it('ne signale rien quand la pause a été décidée par un participant', () => {
+      loadMedia(playback({ paused: true, position: 10 }), { readyState: 2 });
+
+      advance(3000);
+
+      expect(bufferEvents()).toEqual([]);
+    });
+
+    it('ne signale pas la fin du média comme un blocage, et n’y saute pas en boucle', () => {
+      // La lecture atteint la fin du média (200 s) une seconde plus tard.
+      loadMedia(playback({ paused: false, position: 199, updatedAt: NOW }));
+      fake.currentTime = 200;
+      fake.readyState = 2;
+      const seeks = vi.fn();
+      Object.defineProperty(element, 'currentTime', { configurable: true, get: () => 200, set: seeks });
+
+      advance(5000);
+
+      expect(bufferEvents()).toEqual([]);
+      expect(seeks).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('lecture automatique bloquée par le navigateur', () => {
+    /** Le navigateur refuse play() tant que l'utilisateur n'a pas cliqué. */
+    const blocked = async () => {
+      receive(playback({ paused: false, position: 0, updatedAt: NOW }));
+      http.expectOne('/api/media/m1/url').flush({ url: '/u', expiresAt: '', media: media() });
+      fixture.detectChanges();
+      stubElement();
+      play.mockImplementation(() => Promise.reject(new DOMException('bloqué', 'NotAllowedError')));
+      element.dispatchEvent(new Event('loadedmetadata'));
+      await vi.advanceTimersByTimeAsync(0);
+      fixture.detectChanges();
+    };
+
+    it('demande un clic, sans mettre le salon en pause pour buffering', async () => {
+      await blocked();
+
+      expect(component.needsGesture()).toBe(true);
+      expect(host().querySelector('.gesture')?.textContent).toContain('Cliquer pour rejoindre la lecture');
+
+      fake.readyState = 2;
+      advance(3000);
+      expect(bufferEvents()).toEqual([]);
+    });
+
+    it('après le clic, rejoint la lecture à la position courante du salon', async () => {
+      await blocked();
+      advance(4000);
+      play.mockImplementation(() => {
+        fake.paused = false;
+        return Promise.resolve();
+      });
+      play.mockClear();
+
+      host().querySelector<HTMLButtonElement>('.gesture')?.click();
+      fixture.detectChanges();
+
+      expect(play).toHaveBeenCalledOnce();
+      expect(fake.currentTime).toBe(4);
+      expect(host().querySelector('.gesture')).toBeNull();
+      expect(commands()).toEqual([]); // rejoindre n'est pas une commande pour le salon
+    });
+  });
+
+  it('désactive les commandes et l’indique quand la connexion au salon est perdue', () => {
+    loadMedia(playback({ paused: false }));
+
+    socket.receive('disconnect', 'transport close');
+    fixture.detectChanges();
+
+    expect(host().querySelector('.status')?.textContent).toContain('Reconnexion au salon');
+    expect(host().querySelector<HTMLButtonElement>('.controls .main')?.disabled).toBe(true);
+  });
+});

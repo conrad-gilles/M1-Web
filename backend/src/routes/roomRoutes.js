@@ -1,6 +1,7 @@
 import { Router } from "express";
 import crypto from "node:crypto";
 import { MAX_NAME_LENGTH, MAX_PARTICIPANTS } from "../config.js";
+import { roomEvents } from "../events.js";
 import { createRateLimiter } from "../middleware/rateLimit.js";
 import { roomAuth } from "../middleware/roomAuth.js";
 import { Room } from "../models/Room.js";
@@ -13,8 +14,12 @@ import {
   normalizeRoomCode,
   signRoomToken,
 } from "../services/roomService.js";
+import { presence } from "../sync/presence.js";
 
 const UNKNOWN_ROOM = "Salon inconnu";
+
+// Délai laissé à un participant qui vient d'entrer pour ouvrir son WebSocket.
+const GHOST_GRACE_MS = 2 * 60 * 1000;
 const INVALID_NAME = `Nom d'affichage requis (${MAX_NAME_LENGTH} caractères maximum)`;
 
 /** Valide le nom d'affichage envoyé par le navigateur. */
@@ -132,8 +137,20 @@ export function roomRoutes({ storage, limits = {} }) {
         return res.status(404).json({ message: UNKNOWN_ROOM });
       }
       if (existing.participants.length >= MAX_PARTICIPANTS) {
-        console.warn(`[rooms] Salon complet : ${existing.id}`);
-        return res.status(409).json({ message: "Salon complet" });
+        // Un onglet fermé ne « quitte » pas le salon : avant de refuser, on
+        // retire les participants qui ne sont plus connectés.
+        const ghosts = existing.participants.filter(
+          ({ id, joinedAt }) =>
+            !presence.isOnline(existing.id, id) && Date.now() - joinedAt.getTime() > GHOST_GRACE_MS,
+        );
+        if (ghosts.length === 0) {
+          console.warn(`[rooms] Salon complet : ${existing.id}`);
+          return res.status(409).json({ message: "Salon complet" });
+        }
+        for (const ghost of ghosts) {
+          await Room.updateOne({ _id: existing.id }, { $pull: { participants: { id: ghost.id } } });
+        }
+        console.log(`[rooms] ${ghosts.length} participant(s) absent(s) retiré(s) de ${existing.id}`);
       }
 
       // $push est atomique : deux entrées simultanées ne s'écrasent pas.
@@ -174,6 +191,7 @@ export function roomRoutes({ storage, limits = {} }) {
         { $pull: { participants: { id: req.participant.id } } },
       );
       console.log(`[rooms] Participant ${req.participant.id} sorti de ${req.room.id}`);
+      roomEvents.emit("participant:left", req.room.id, req.participant.id);
       res.status(204).end();
     } catch (error) {
       console.error("[rooms] Erreur pendant la sortie du salon", error);
@@ -199,6 +217,7 @@ export function roomRoutes({ storage, limits = {} }) {
         }
       }
       console.log(`[rooms] Code changé pour le salon ${room.id}`);
+      roomEvents.emit("room:updated", room.id, room.toPublic());
       res.json(room.toPublic());
     } catch (error) {
       console.error("[rooms] Erreur pendant le changement de code", error);

@@ -47,7 +47,9 @@ rejoignent. Deux onglets du même navigateur comptent comme deux participants.
 ## Documents de travail
 
 - [SUJET_ETUDIANT_TP1.md](SUJET_ETUDIANT_TP1.md), [SUJET_ETUDIANT_TP2.md](SUJET_ETUDIANT_TP2.md) et [SUJET_ETUDIANT_TP3.md](SUJET_ETUDIANT_TP3.md) : missions des trois séances ;
-- [API_CONTRACT.md](API_CONTRACT.md) : endpoints, authentification et formats échangés ;
+- [API_CONTRACT.md](Documentation/API_CONTRACT.md) : endpoints, authentification et formats échangés ;
+- [SYNC_PROTOCOL.md](Documentation/SYNC_PROTOCOL.md) : canal temps réel des salons (lecture synchronisée) ;
+- [SharingPlatformProjectClaude.md](SharingPlatformProjectClaude.md) : plan du projet et état d'avancement ;
 - [RAPPORT_IA_MODELE.md](RAPPORT_IA_MODELE.md) : modèle de compte rendu.
 - [CONSEILS_POUR_UTIISER_ASSISTANT_AI.md](CONSEILS_POUR_UTIISER_ASSISTANT_AI.md) : utiliser correctement un assistant IA, quel que soit l’outil choisi.
 

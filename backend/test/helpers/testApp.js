@@ -1,10 +1,13 @@
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { io as connectSocket } from "socket.io-client";
 import { createApp } from "../../src/app.js";
 import { SECRET } from "../../src/config.js";
 import { Media } from "../../src/models/Media.js";
 import { Room } from "../../src/models/Room.js";
+import { attachRealtime } from "../../src/realtime.js";
 import { createLocalStorage } from "../../src/storage/localStorage.js";
 import { installFakeDb } from "./fakeDb.js";
 
@@ -17,7 +20,11 @@ export async function startTestApp({ limits = { creationsPerHour: Infinity } } =
   const uploadsDir = fs.mkdtempSync(path.join(os.tmpdir(), "gpc-uploads-"));
   const storage = createLocalStorage({ directory: uploadsDir, secret: SECRET });
   const app = createApp({ storage, limits, frontendDir: path.join(uploadsDir, "aucun-build") });
-  const server = app.listen(0);
+  // Comme server.js : Express et Socket.IO partagent le même serveur HTTP.
+  const server = http.createServer(app);
+  const realtime = attachRealtime(server);
+  const sockets = [];
+  server.listen(0);
   await new Promise((resolve) => server.once("listening", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
 
@@ -63,11 +70,40 @@ export async function startTestApp({ limits = { creationsPerHour: Infinity } } =
       });
     },
 
+    /**
+     * Ouvre un WebSocket avec un jeton de salon et attend l'état initial.
+     * Renvoie le socket, complété par `initial` (premier "room:state") par
+     * `next(event)` qui attend le prochain événement de ce nom, par `until` et
+     * par `command` qui envoie une commande de lecture.
+     */
+    connect(token) {
+      const socket = connectSocket(base, { auth: { token }, transports: ["websocket"], reconnection: false });
+      sockets.push(socket);
+      socket.next = (event) => new Promise((resolve) => socket.once(event, resolve));
+      // Attend le premier événement de ce nom qui satisfait la condition.
+      socket.until = (event, predicate) =>
+        new Promise((resolve) => {
+          const listener = (payload) => {
+            if (!predicate(payload)) return;
+            socket.off(event, listener);
+            resolve(payload);
+          };
+          socket.on(event, listener);
+        });
+      socket.command = (command) =>
+        new Promise((resolve) => socket.emit("playback:command", command, resolve));
+      return new Promise((resolve, reject) => {
+        socket.once("room:state", (state) => resolve(Object.assign(socket, { initial: state })));
+        socket.once("connect_error", reject);
+      });
+    },
+
     /** Fichiers présents dans le stockage. */
     storedFiles: () => fs.readdirSync(uploadsDir),
 
     async stop() {
-      await new Promise((resolve) => server.close(resolve));
+      for (const socket of sockets) socket.disconnect();
+      await realtime.close();
       fs.rmSync(uploadsDir, { recursive: true, force: true });
     },
   };

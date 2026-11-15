@@ -62,15 +62,3 @@
   background: #fdecea;
   color: #611a15;
 }
-
-audio,
-video {
-  width: 100%;
-  margin-top: 0.5rem;
-}
-
-video {
-  max-height: 60vh;
-  background: #000;
-  border-radius: 0.5rem;
-}

@@ -45,12 +45,15 @@ French):
 ```text
 [startup] Connecté à MongoDB Atlas
 [startup] La base guitar-practice-cloud est prête à recevoir des données
-[startup] Compte de démonstration déjà présent   (or "créé" the first time)
-Guitar Practice Cloud API: http://localhost:3000/api/health
+[storage] Stockage local prêt : .../backend/data/uploads
+Sharing Platform API: http://localhost:3000/api/health
 ```
 
 If a MongoDB connection error is displayed instead: check `backend/.env`
 (URI, password, IP allowed in Atlas → Network Access).
+
+The backend now refuses to start without `JWT_SECRET` in `backend/.env`: it
+signs the room tokens and the media URLs.
 
 ## 2. Start the frontend
 
