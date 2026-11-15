@@ -12,6 +12,14 @@ if (!uri) {
   throw error;
 }
 
+// Sans JWT_SECRET, app.js utiliserait un secret de secours visible dans le
+// dépôt public : n'importe qui pourrait alors fabriquer des jetons valides.
+if (!process.env.JWT_SECRET) {
+  const error = new Error("JWT_SECRET manque dans backend/.env");
+  console.error("[startup] Secret JWT absent", error);
+  throw error;
+}
+
 try {
   // `await` suspend le démarrage jusqu'à la connexion effective à MongoDB.
   // Le `then` rend le succès visible dans les logs.

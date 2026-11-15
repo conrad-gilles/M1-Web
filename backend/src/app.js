@@ -13,6 +13,12 @@ import { Track } from "./models/Track.js";
 // MongoDB ne conserve que leurs métadonnées : titre, nom, taille, etc.
 const UPLOADS = path.resolve("data/uploads");
 
+// Emplacement du build Angular (`npm run build` dans frontend-starter/).
+const FRONTEND_DIST = path.resolve(
+  import.meta.dirname,
+  "../../frontend-starter/dist/gpc/browser",
+);
+
 try {
   // mkdirSync est utilisé au démarrage : l'application doit disposer de ce
   // dossier avant de pouvoir accepter le premier upload.
@@ -124,7 +130,7 @@ const upload = multer({
  * Cette séparation permet au serveur réel et aux tests de créer la même
  * application. Le port est ouvert uniquement dans server.js.
  */
-export function createApp() {
+export function createApp({ frontendDir = FRONTEND_DIST } = {}) {
   const app = express();
 
   // Journaliser la fin de chaque requête permet de suivre méthode, URL,
@@ -437,6 +443,34 @@ export function createApp() {
       next(error);
     }
   });
+
+  // Une route /api inconnue répond en JSON : elle ne doit jamais recevoir la
+  // page Angular servie ci-dessous.
+  app.use("/api", (req, res) => {
+    console.warn(`[http] Route API inconnue : ${req.method} ${req.path}`);
+    res.status(404).json({ message: "Ressource inconnue" });
+  });
+
+  // En production (Render), Express sert aussi le build Angular : le frontend
+  // et l'API partagent alors la même origine, sans configuration CORS. En
+  // développement, le build est absent et `ng serve` joue ce rôle.
+  const indexFile = path.join(frontendDir, "index.html");
+  if (fs.existsSync(indexFile)) {
+    console.log(`[startup] Build Angular servi depuis ${frontendDir}`);
+    app.use(express.static(frontendDir));
+    // Toute autre requête GET reçoit index.html : c'est le routeur Angular qui
+    // interprète ensuite l'URL (/tracks, /login, ...).
+    app.get(/.*/, (_req, res, next) => {
+      res.sendFile(indexFile, (error) => {
+        if (error) {
+          console.error("[http] Erreur d'envoi de index.html", error);
+          if (!res.headersSent) next(error);
+        }
+      });
+    });
+  } else {
+    console.log("[startup] Aucun build Angular à servir (mode développement)");
+  }
 
   /** Gestionnaire central des erreurs connues de l'application. */
   app.use((error, _req, res, next) => {

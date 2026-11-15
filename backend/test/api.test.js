@@ -1,5 +1,8 @@
 import test, { mock } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
 import { createApp } from "../src/app.js";
@@ -204,4 +207,35 @@ test("DELETE d'une piste inexistante : 404 « Piste inconnue »", async () => {
 
   assert.equal(r.status, 404);
   assert.equal((await r.json()).message, "Piste inconnue");
+});
+
+/* -------------------------------------------------------------------------
+ * Déploiement : Express sert le build Angular quand il existe.
+ * ---------------------------------------------------------------------- */
+
+test("le build Angular est servi, sans masquer les routes /api", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gpc-front-"));
+  fs.writeFileSync(path.join(dir, "index.html"), "<html>angular</html>");
+  fs.writeFileSync(path.join(dir, "main.js"), "console.log('main')");
+
+  const front = createApp({ frontendDir: dir }).listen(0);
+  await new Promise((r) => front.once("listening", r));
+  const url = `http://127.0.0.1:${front.address().port}`;
+
+  try {
+    // Un fichier du build est servi tel quel.
+    assert.equal(await (await fetch(url + "/main.js")).text(), "console.log('main')");
+    // Une route du routeur Angular reçoit index.html.
+    const deep = await fetch(url + "/tracks");
+    assert.equal(deep.status, 200);
+    assert.equal(await deep.text(), "<html>angular</html>");
+    // L'API garde la priorité, y compris pour une route inconnue.
+    assert.equal((await (await fetch(url + "/api/health")).json()).status, "ok");
+    const unknown = await fetch(url + "/api/inconnue");
+    assert.equal(unknown.status, 404);
+    assert.equal((await unknown.json()).message, "Ressource inconnue");
+  } finally {
+    front.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
