@@ -3,11 +3,12 @@ import { HttpEventType, provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, TestRequest, provideHttpClientTesting } from '@angular/common/http/testing';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { Page } from '../../shared/models/page.model';
-import { Track } from '../../shared/models/track.model';
+import { Media } from '../../shared/models/media.model';
 import { TracksPageComponent } from './tracks-page';
 
-const track = (id: string, title = `Morceau ${id}`): Track => ({
+const track = (id: string, title = `Morceau ${id}`): Media => ({
   id,
+  kind: 'audio',
   title,
   originalName: `${id}.mp3`,
   mimeType: 'audio/mpeg',
@@ -15,7 +16,7 @@ const track = (id: string, title = `Morceau ${id}`): Track => ({
   createdAt: '2026-10-01T10:00:00.000Z',
 });
 
-const page = (items: Track[], current = 1, pages = 1): Page<Track> => ({
+const page = (items: Media[], current = 1, pages = 1): Page<Media> => ({
   items,
   page: current,
   limit: 5,
@@ -34,7 +35,7 @@ describe('TracksPageComponent', () => {
   const expectList = (pageNumber: number): TestRequest =>
     http.expectOne(
       (req) =>
-        req.method === 'GET' && req.url === '/api/tracks' && req.params.get('page') === String(pageNumber),
+        req.method === 'GET' && req.url === '/api/media' && req.params.get('page') === String(pageNumber),
     );
 
   /** Crée le composant sans répondre à la liste initiale. */
@@ -44,7 +45,7 @@ describe('TracksPageComponent', () => {
   };
 
   /** Crée le composant et répond à la liste initiale (page 1). */
-  const create = (initial: Page<Track> = page([track('a'), track('b')])) => {
+  const create = (initial: Page<Media> = page([track('a'), track('b')])) => {
     createPending();
     expectList(1).flush(initial);
     fixture.detectChanges();
@@ -135,12 +136,12 @@ describe('TracksPageComponent', () => {
       expect(snackBar.open).not.toHaveBeenCalled();
     });
 
-    it('appelle DELETE /api/tracks/:id, notifie puis recharge la liste', () => {
+    it('appelle DELETE /api/media/:id, notifie puis recharge la liste', () => {
       create();
 
       component.remove(track('a', 'Blues'));
 
-      const del = http.expectOne('/api/tracks/a');
+      const del = http.expectOne('/api/media/a');
       expect(del.request.method).toBe('DELETE');
       expect(component.deletingId()).toBe('a');
       del.flush(null, { status: 204, statusText: 'No Content' });
@@ -168,7 +169,7 @@ describe('TracksPageComponent', () => {
 
       component.remove(track('a'));
       http
-        .expectOne('/api/tracks/a')
+        .expectOne('/api/media/a')
         .flush({ message: 'Piste inconnue' }, { status: 404, statusText: 'Not Found' });
 
       expect(component.deletingId()).toBeNull();
@@ -187,7 +188,7 @@ describe('TracksPageComponent', () => {
 
       component.remove(track('a'));
       http
-        .expectOne('/api/tracks/a')
+        .expectOne('/api/media/a')
         .flush({ message: 'Erreur interne' }, { status: 500, statusText: 'Server Error' });
 
       expect(component.deletingId()).toBeNull();
@@ -201,7 +202,7 @@ describe('TracksPageComponent', () => {
       expectList(2).flush(page([track('z')], 2, 2));
 
       component.remove(track('z'));
-      http.expectOne('/api/tracks/z').flush(null, { status: 204, statusText: 'No Content' });
+      http.expectOne('/api/media/z').flush(null, { status: 204, statusText: 'No Content' });
       // La page 2 est maintenant vide : le serveur ne compte plus qu'une page.
       expectList(2).flush({ items: [], page: 2, limit: 5, total: 5, pages: 1 });
       expectList(1).flush(page([track('a')], 1, 1));
@@ -213,7 +214,7 @@ describe('TracksPageComponent', () => {
 
   describe('upload (Mission 6)', () => {
     const audioFile = () => new File(['abc'], 'song.mp3', { type: 'audio/mpeg' });
-    const postRequest = () => http.expectOne((req) => req.method === 'POST' && req.url === '/api/tracks');
+    const postRequest = () => http.expectOne((req) => req.method === 'POST' && req.url === '/api/media');
 
     it('commence à idle', () => {
       create();
@@ -284,12 +285,12 @@ describe('TracksPageComponent', () => {
       component.file = audioFile();
 
       component.upload();
-      postRequest().flush({ message: 'Format audio non accepté' }, { status: 400, statusText: 'Bad Request' });
+      postRequest().flush({ message: 'Format de média non accepté' }, { status: 400, statusText: 'Bad Request' });
       fixture.detectChanges();
 
-      expect(component.uploadState()).toEqual({ status: 'error', message: 'Format audio non accepté' });
+      expect(component.uploadState()).toEqual({ status: 'error', message: 'Format de média non accepté' });
       expect(component.title.enabled).toBe(true);
-      expect((fixture.nativeElement as HTMLElement).textContent).toContain('Format audio non accepté');
+      expect((fixture.nativeElement as HTMLElement).textContent).toContain('Format de média non accepté');
 
       // Un nouvel essai est possible après l'échec.
       component.upload();
@@ -327,6 +328,34 @@ describe('TracksPageComponent', () => {
       expect(component.fileError()).toContain('Format non supporté');
       expect(input.value).toBe('');
       // http.verify() (afterEach) garantit qu'aucune requête n'est partie
+    });
+  });
+
+  describe('lecture en streaming', () => {
+    it("place l'URL signée dans <audio src> sans télécharger le fichier", () => {
+      create();
+
+      component.play(track('a', 'Blues'));
+      const request = http.expectOne('/api/media/a/url');
+      expect(request.request.method).toBe('GET');
+      request.flush({ url: '/api/media/a/stream?token=t', expiresAt: '2026-11-15T20:00:00.000Z' });
+      fixture.detectChanges();
+
+      expect(component.playingTrackId()).toBe('a');
+      const audio = (fixture.nativeElement as HTMLElement).querySelector('audio');
+      expect(audio?.getAttribute('src')).toBe('/api/media/a/stream?token=t');
+      // http.verify() (afterEach) garantit qu'aucune requête de Blob n'est partie
+    });
+
+    it("affiche le message du serveur quand l'URL est refusée", () => {
+      create();
+
+      component.play(track('a'));
+      http.expectOne('/api/media/a/url').flush({ message: 'Média inconnu' }, { status: 404, statusText: 'Not Found' });
+      fixture.detectChanges();
+
+      expect(component.audioUrl()).toBe('');
+      expect(component.audioError()).toBe('Média inconnu');
     });
   });
 });

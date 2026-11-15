@@ -1,14 +1,14 @@
-import { Component, ElementRef, OnDestroy, computed, inject, signal, viewChild } from '@angular/core';
+import { Component, ElementRef, computed, inject, signal, viewChild } from '@angular/core';
 import { HttpErrorResponse, HttpEventType } from '@angular/common/http';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { MatSnackBar } from '@angular/material/snack-bar';
-import { Track } from '../../shared/models/track.model';
+import { Media } from '../../shared/models/media.model';
 import { UploadState } from '../../shared/models/upload-state.model';
-import { TrackService } from '../../shared/services/track.service';
+import { MediaService } from '../../shared/services/media.service';
 
 /**
- * Formats audios acceptés par le backend (voir backend/src/app.js, la variable
- * `allowed`). Dupliquer cette liste côté frontend permet d'afficher une erreur
+ * Formats audios acceptés par le backend (voir backend/src/config.js, la variable
+ * `ALLOWED_MIME_TYPES`). Dupliquer cette liste côté frontend permet d'afficher une erreur
  * immédiate, mais ne remplace jamais la vérification faite par le serveur :
  * un client malveillant peut toujours envoyer une requête directement à l'API
  * sans passer par ce formulaire.
@@ -36,12 +36,12 @@ const SNACKBAR_DURATION = 5000;
   templateUrl: './tracks-page.html',
   styleUrl: './tracks-page.css',
 })
-export class TracksPageComponent implements OnDestroy {
-  private readonly service = inject(TrackService);
+export class TracksPageComponent {
+  private readonly service = inject(MediaService);
   private readonly snackBar = inject(MatSnackBar);
 
   // --- Bibliothèque paginée (Mission 2) ---------------------------------
-  readonly tracks = signal<Track[]>([]);
+  readonly tracks = signal<Media[]>([]);
   readonly page = signal(1);
   readonly pages = signal(1);
   readonly loading = signal(false);
@@ -95,16 +95,6 @@ export class TracksPageComponent implements OnDestroy {
     this.load();
   }
 
-  /**
-   * Le composant ne conserve jamais plus d'une URL objet à la fois : elle est
-   * révoquée dès qu'une nouvelle piste est chargée (voir `play`) et à la
-   * destruction du composant, pour éviter une fuite mémoire côté navigateur.
-   */
-  ngOnDestroy(): void {
-    const url = this.audioUrl();
-    if (url) URL.revokeObjectURL(url);
-  }
-
   choose(event: Event): void {
     const input = event.target as HTMLInputElement;
     const selected = input.files?.[0];
@@ -134,7 +124,7 @@ export class TracksPageComponent implements OnDestroy {
    * Vérification frontend "meilleur effort" : elle améliore l'expérience en
    * évitant un aller-retour réseau inutile, mais le backend refait toujours
    * les mêmes contrôles (voir `fileFilter` et `limits.fileSize` dans
-   * backend/src/app.js) car le frontend peut être contourné.
+   * backend/src/middleware/upload.js) car le frontend peut être contourné.
    */
   private validateFile(file: File): string | null {
     const extension = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
@@ -153,7 +143,7 @@ export class TracksPageComponent implements OnDestroy {
   // --- Bibliothèque paginée ------------------------------------------------
 
   /**
-   * Flux : composant -> TrackService.list -> HttpClient.get -> GET
+   * Flux : composant -> MediaService.list -> HttpClient.get -> GET
    * /api/tracks?page=...&limit=... . À chaque appel, une nouvelle requête
    * HTTP est envoyée avec la page demandée ; l'application ne récupère
    * jamais toutes les pistes pour les découper localement.
@@ -193,7 +183,7 @@ export class TracksPageComponent implements OnDestroy {
   // --- Upload ----------------------------------------------------------
 
   /**
-   * Flux : formulaire -> TrackService.upload -> HttpClient.post (observe:
+   * Flux : formulaire -> MediaService.upload -> HttpClient.post (observe:
    * 'events', reportProgress: true). Le flux émet plusieurs événements : des
    * `UploadProgress` pendant l'envoi (loaded / total), puis un unique
    * `Response` avec la piste créée. Les autres types (Sent, ResponseHeader…)
@@ -245,22 +235,20 @@ export class TracksPageComponent implements OnDestroy {
   // --- Lecture -----------------------------------------------------------
 
   /**
-   * Flux : bouton Lire -> TrackService.audio -> HttpClient.get(responseType:
-   * 'blob') -> GET /api/tracks/:id/audio (avec le JWT ajouté par
-   * authInterceptor) -> Blob reçu en une fois -> URL.createObjectURL -> src
-   * de l'élément <audio>. Une URL classique placée directement dans `src` ne
-   * passerait pas par HttpClient et ne recevrait donc pas l'en-tête
-   * Authorization ajouté par l'intercepteur : le serveur répondrait 401.
+   * Flux : bouton Lire -> MediaService.streamUrl -> GET /api/media/:id/url
+   * (avec le JWT ajouté par authInterceptor) -> URL signée temporaire -> src
+   * de l'élément <audio>. Le navigateur charge alors lui-même le fichier par
+   * requêtes Range (206 Partial Content) : la lecture démarre avant la fin du
+   * téléchargement et le déplacement dans le morceau fonctionne. Le jeton est
+   * dans l'URL car <audio src> ne peut pas envoyer d'en-tête Authorization.
    */
-  play(track: Track): void {
+  play(track: Media): void {
     this.audioError.set('');
 
-    this.service.audio(track.id).subscribe({
-      next: (blob) => {
-        console.debug('[TracksPage] Audio chargé', track.id, blob.size, 'octets');
-        const previousUrl = this.audioUrl();
-        if (previousUrl) URL.revokeObjectURL(previousUrl);
-        this.audioUrl.set(URL.createObjectURL(blob));
+    this.service.streamUrl(track.id).subscribe({
+      next: ({ url }) => {
+        console.debug('[TracksPage] URL de lecture reçue', track.id);
+        this.audioUrl.set(url);
         this.playingTrackId.set(track.id);
         this.playingTitle.set(track.title);
       },
@@ -275,8 +263,8 @@ export class TracksPageComponent implements OnDestroy {
 
   /** Déclenché par l'événement (error) du lecteur HTML natif. */
   onPlaybackError(): void {
-    console.error('[TracksPage] Le lecteur audio a signalé une erreur de décodage');
-    this.audioError.set('Le fichier audio ne peut pas être décodé par le navigateur.');
+    console.error('[TracksPage] Le lecteur audio a signalé une erreur');
+    this.audioError.set('Lecture impossible : fichier illisible ou lien de lecture expiré.');
     this.playingTrackId.set(null);
     this.playingTitle.set('');
   }
@@ -288,7 +276,7 @@ export class TracksPageComponent implements OnDestroy {
   // --- Suppression (Mission 5) -------------------------------------------
 
   /**
-   * Flux : bouton Supprimer -> confirmation -> TrackService.remove ->
+   * Flux : bouton Supprimer -> confirmation -> MediaService.remove ->
    * HttpClient.delete -> DELETE /api/tracks/:id -> 204 -> SnackBar + rechargement.
    *
    * Le backend renvoie 404 aussi bien quand la piste n'existe plus (supprimée
@@ -297,7 +285,7 @@ export class TracksPageComponent implements OnDestroy {
    * pas besoin. Dans les deux cas la piste affichée est obsolète, donc on
    * prévient l'utilisateur et on recharge la liste.
    */
-  remove(track: Track): void {
+  remove(track: Media): void {
     // Empêche les doubles clics pendant qu'une suppression est en cours.
     if (this.deletingId()) return;
     if (!confirm(`Supprimer définitivement « ${track.title} » ?`)) return;
@@ -326,13 +314,11 @@ export class TracksPageComponent implements OnDestroy {
     });
   }
 
-  /** Arrête la lecture (et libère l'URL objet) si la piste donnée est en cours. */
+  /** Arrête la lecture si la piste donnée est en cours. */
   private stopPlayback(trackId: string): void {
     if (this.playingTrackId() !== trackId) return;
     this.playingTrackId.set(null);
     this.playingTitle.set('');
-    const url = this.audioUrl();
-    if (url) URL.revokeObjectURL(url);
     this.audioUrl.set('');
   }
 
@@ -363,7 +349,7 @@ export class TracksPageComponent implements OnDestroy {
   }
 
   formatMimeType(mimeType: string): string {
-    return mimeType.replace('audio/', '').toUpperCase();
+    return mimeType.replace(/^(audio|video)\//, '').toUpperCase();
   }
 
   private extractErrorMessage(error: HttpErrorResponse, fallback: string): string {

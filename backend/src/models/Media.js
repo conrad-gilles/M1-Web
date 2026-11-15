@@ -1,9 +1,9 @@
 import mongoose from "mongoose";
 
 /*
- * Ce schéma conserve les métadonnées d'une piste. Le fichier audio lui-même
- * reste sur le disque ; storedName contient le nom technique utilisé côté
- * serveur et n'est jamais exposé par toPublic().
+ * Ce schéma conserve les métadonnées d'un média (audio ou vidéo). Le fichier
+ * lui-même est confié au module de stockage ; storageKey contient le nom
+ * technique utilisé côté serveur et n'est jamais exposé par toPublic().
  */
 const schema = new mongoose.Schema(
   {
@@ -13,16 +13,17 @@ const schema = new mongoose.Schema(
       required: true,
       index: true,
     },
-    title: { type: String, required: true, trim: true },
+    kind: { type: String, required: true, enum: ["audio", "video"] },
+    title: { type: String, required: true, trim: true, maxlength: 200 },
     originalName: { type: String, required: true },
-    storedName: { type: String, required: true, select: false },
+    storageKey: { type: String, required: true, select: false },
     mimeType: { type: String, required: true },
     size: { type: Number, required: true, min: 0 },
   },
   { timestamps: true },
 );
 
-// Cet index accélère la liste des pistes d'un utilisateur triées par date.
+// Cet index accélère la liste des médias d'un utilisateur triés par date.
 schema.index({ ownerId: 1, createdAt: -1 });
 
 /**
@@ -30,10 +31,9 @@ schema.index({ ownerId: 1, createdAt: -1 });
  * L'identifiant MongoDB devient la propriété simple `id` attendue par Angular.
  */
 schema.methods.toPublic = function () {
-  console.debug(`[track-model] Préparation de la piste publique ${this.id}`);
   return {
     id: this.id,
-    ownerId: String(this.ownerId),
+    kind: this.kind,
     title: this.title,
     originalName: this.originalName,
     mimeType: this.mimeType,
@@ -42,4 +42,4 @@ schema.methods.toPublic = function () {
   };
 };
 
-export const Track = mongoose.model("Track", schema);
+export const Media = mongoose.model("Media", schema);
