@@ -55,6 +55,22 @@ If a MongoDB connection error is displayed instead: check `backend/.env`
 The backend now refuses to start without `JWT_SECRET` in `backend/.env`: it
 signs the room tokens and the media URLs.
 
+### If MongoDB Atlas is unreachable: local database
+
+Errors such as `tlsv1 alert internal error` or *IP that isn't whitelisted*
+mean Atlas refuses your connection (IP not in Network Access, paused cluster,
+network blocking port 27017). To keep working, start the backend with a local
+MongoDB instead:
+
+```bash
+cd backend
+npm run start:memory
+```
+
+The first run downloads the MongoDB binary once. Data is kept in
+`backend/data/mongo-dev/` between runs (ignored by Git). It does not touch
+Atlas; use `npm start` again once Atlas is reachable.
+
 ## 2. Start the frontend
 
 In a **second** terminal (leave the first one running):

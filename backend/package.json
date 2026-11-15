@@ -5,7 +5,8 @@
     "scripts": {
         "start": "node --env-file=.env src/server.js",
         "start:local": "node src/server.js",
-        "test": "node --test"
+        "test": "node --test",
+        "start:memory": "node --env-file-if-exists=.env scripts/start-memory.js"
     },
     "dependencies": {
         "cors": "^2.8.5",
@@ -16,6 +17,7 @@
         "socket.io": "^4.8.4"
     },
     "devDependencies": {
+        "mongodb-memory-server": "^11.3.0",
         "socket.io-client": "^4.8.4"
     }
 }

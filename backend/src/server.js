@@ -27,9 +27,9 @@ try {
   // `await` suspend le démarrage jusqu'à la connexion effective à MongoDB.
   // Le `then` rend le succès visible dans les logs.
   await mongoose.connect(uri).then(() => {
-    console.log("[startup] Connecté à MongoDB Atlas");
+    console.log("[startup] Connecté à MongoDB");
     console.log(
-      "[startup] La base guitar-practice-cloud est prête à recevoir des données",
+      "[startup] La base est prête à recevoir des données",
     );
     console.log(`[startup] Vérification : http://localhost:${port}/api/health`);
   });
