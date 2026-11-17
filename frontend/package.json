@@ -29,5 +29,11 @@
         "jsdom": "^30.1.2",
         "typescript": "~6.0.0",
         "vitest": "^4.0.8"
+    },
+    "allowScripts": {
+        "@parcel/watcher": false,
+        "esbuild": false,
+        "lmdb": false,
+        "msgpackr-extract": false
     }
 }
