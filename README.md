@@ -62,12 +62,22 @@ Les fichiers de `frontend/fichiers-audio-de-test/` servent pour les essais.
 ## Tests
 
 ```bash
-cd backend && npm test    # sans MongoDB
-cd frontend && npm test
+cd backend && npm test              # API, temps réel, cas d'erreur (sans MongoDB)
+cd frontend && npm test             # composants et services Angular
+cd frontend && npm run test:coverage   # idem, avec la couverture de code
+cd e2e && npm install && npx playwright install chromium   # une seule fois
+cd e2e && npm run test:full         # de bout en bout, dans de vrais navigateurs
 ```
 
-La CI GitHub Actions ([ci.yml](.github/workflows/ci.yml)) lance ces tests et le
-build Angular à chaque push.
+Les tests de bout en bout (`e2e/`) lancent l'application complète (backend,
+base MongoDB locale éphémère, build Angular) et la pilotent avec Chromium :
+création et entrée dans un salon, lecture synchronisée entre deux personnes
+(écart inférieur à 0,5 s), rattrapage d'un retard ou d'une avance, arrivant
+tardif, onglets d'un même navigateur, actions de l'hôte, affichage sur
+téléphone.
+
+La CI GitHub Actions ([ci.yml](.github/workflows/ci.yml)) lance les trois
+suites et le build Angular à chaque push.
 
 ## Documentation
 

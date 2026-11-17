@@ -355,4 +355,55 @@ describe('MediaLibraryComponent', () => {
       expect(cards[1].textContent).toContain('Dans le lecteur');
     });
   });
+
+  describe('filtre et validation', () => {
+    it('filtre la page affichée par titre, sans requête', () => {
+      create(page([track('a', 'Blues du soir'), track('b', 'Jazz manouche')]));
+
+      component.filterText.set('  JAZZ ');
+      fixture.detectChanges();
+
+      const cards = (fixture.nativeElement as HTMLElement).querySelectorAll('.media-card');
+      expect(cards.length).toBe(1);
+      expect(cards[0].textContent).toContain('Jazz manouche');
+
+      component.filterText.set('aucun');
+      fixture.detectChanges();
+      expect((fixture.nativeElement as HTMLElement).textContent).toContain('Aucun média ne correspond à ce filtre');
+    });
+
+    it('refuse un fichier de plus de 25 Mo avant tout envoi', () => {
+      create();
+      const big = new File(['x'], 'gros.mp3', { type: 'audio/mpeg' });
+      Object.defineProperty(big, 'size', { value: 26 * 1024 * 1024 });
+      const input = { files: [big], value: 'gros.mp3' };
+
+      component.choose({ target: input } as unknown as Event);
+
+      expect(component.file).toBeUndefined();
+      expect(component.fileError()).toBe('Fichier trop volumineux (26.0 Mo). Taille maximale : 25 Mo.');
+    });
+
+    it('accepte un fichier sans type MIME grâce à son extension', () => {
+      create();
+      const input = { files: [new File(['x'], 'piste.m4a', { type: '' })], value: 'piste.m4a' };
+
+      component.choose({ target: input } as unknown as Event);
+
+      expect(component.fileError()).toBe('');
+      expect(component.file?.name).toBe('piste.m4a');
+    });
+
+    it('formate tailles, dates et types pour l’affichage', () => {
+      create();
+
+      expect(component.formatSize(512)).toBe('512 o');
+      expect(component.formatSize(2048)).toBe('2.0 Ko');
+      expect(component.formatSize(3 * 1024 * 1024)).toBe('3.0 Mo');
+      expect(component.formatSize(5 * 1024 ** 4)).toBe('5120.0 Go');
+      expect(component.formatMimeType('audio/mpeg')).toBe('MPEG');
+      expect(component.formatMimeType('video/mp4')).toBe('MP4');
+      expect(component.formatDate('2026-11-15T10:00:00.000Z')).toBe('15 nov. 2026');
+    });
+  });
 });

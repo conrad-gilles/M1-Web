@@ -7,27 +7,29 @@ import { MongoMemoryServer } from "mongodb-memory-server";
  * Utile quand Atlas est inaccessible (IP non autorisée, réseau qui bloque le
  * port 27017, cluster en pause). Réservé au développement.
  *
- * Les données sont gardées dans backend/data/mongo-dev entre deux lancements.
- * Le premier lancement télécharge le binaire MongoDB (une seule fois).
+ * Les données sont gardées dans backend/data/mongo-dev entre deux lancements,
+ * sauf avec MEMORY_DB_EPHEMERAL=1 (tests de bout en bout : base vide à chaque
+ * lancement). Le premier lancement télécharge le binaire MongoDB.
  */
-const dbPath = path.resolve(import.meta.dirname, "../data/mongo-dev");
-fs.mkdirSync(dbPath, { recursive: true });
+const ephemeral = Boolean(process.env.MEMORY_DB_EPHEMERAL);
+const dbPath = ephemeral ? null : path.resolve(import.meta.dirname, "../data/mongo-dev");
+if (dbPath) fs.mkdirSync(dbPath, { recursive: true });
 
 console.log("[dev] Démarrage d'une base MongoDB locale (premier lancement : téléchargement)…");
-const mongo = await MongoMemoryServer.create({
-  instance: { dbPath, storageEngine: "wiredTiger" },
-});
+const mongo = await MongoMemoryServer.create(
+  dbPath ? { instance: { dbPath, storageEngine: "wiredTiger" } } : {},
+);
 
 // Remplace l'URI Atlas éventuellement présente dans .env.
 process.env.MONGODB_URI = mongo.getUri("sharing-platform-dev");
 // Un secret de développement suffit si .env n'en fournit pas.
 process.env.JWT_SECRET ||= "secret-de-developpement-local";
-console.log(`[dev] Base locale prête dans ${dbPath}`);
+console.log(`[dev] Base locale prête${dbPath ? ` dans ${dbPath}` : " (éphémère)"}`);
 
 // Arrête proprement la base avec Ctrl + C.
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, async () => {
-    await mongo.stop({ doCleanup: false });
+    await mongo.stop({ doCleanup: ephemeral });
     process.exit(0);
   });
 }

@@ -105,6 +105,31 @@ describe('HomePageComponent', () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
+  it('affiche le message du serveur quand la création est refusée', () => {
+    create();
+    component.createForm.setValue({ name: 'Alex' });
+
+    component.create();
+    http
+      .expectOne('/api/rooms')
+      .flush({ message: 'Trop de salons créés, réessayez plus tard' }, { status: 429, statusText: 'Too Many Requests' });
+    fixture.detectChanges();
+
+    expect(component.createError()).toBe('Trop de salons créés, réessayez plus tard');
+    expect(component.pending()).toBeNull();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('message générique quand le serveur est injoignable', () => {
+    create();
+    component.joinForm.setValue({ code: 'K7P2QX', name: 'Sam' });
+
+    component.join();
+    http.expectOne('/api/rooms/K7P2QX/join').error(new ProgressEvent('error'));
+
+    expect(component.joinError()).toBe('Impossible de rejoindre le salon.');
+  });
+
   it('empêche une double soumission pendant la requête', () => {
     create();
     component.createForm.setValue({ name: 'Alex' });

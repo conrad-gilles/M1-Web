@@ -1,0 +1,12 @@
+{
+    "name": "sharing-platform-e2e",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "test": "playwright test",
+        "test:full": "npm --prefix ../frontend run build && playwright test"
+    },
+    "devDependencies": {
+        "@playwright/test": "^1.65.1"
+    }
+}

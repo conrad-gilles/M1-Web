@@ -1,6 +1,6 @@
 import { Router } from "express";
 import crypto from "node:crypto";
-import { MAX_NAME_LENGTH, MAX_PARTICIPANTS } from "../config.js";
+import { MAX_NAME_LENGTH, MAX_PARTICIPANTS, RATE_LIMITS } from "../config.js";
 import { roomEvents } from "../events.js";
 import { createRateLimiter } from "../middleware/rateLimit.js";
 import { roomAuth } from "../middleware/roomAuth.js";
@@ -44,7 +44,7 @@ const isDuplicateKey = (error) => error?.code === 11000;
  */
 export function roomRoutes({ storage, limits = {} }) {
   const router = Router();
-  const { failedJoinsPer10Min = 10, creationsPerHour = 10 } = limits;
+  const { failedJoinsPer10Min, creationsPerHour } = { ...RATE_LIMITS, ...limits };
 
   // Un code est court : sans limite, il pourrait être deviné par force brute.
   const failedJoins = createRateLimiter({ limit: failedJoinsPer10Min, windowMs: 10 * 60 * 1000 });

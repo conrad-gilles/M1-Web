@@ -54,3 +54,11 @@ export const MAX_PARTICIPANTS = 10;
 export const MAX_MEDIA_PER_ROOM = 20;
 
 export const MAX_NAME_LENGTH = 30;
+
+// Limites par adresse IP. Les codes sont courts : sans limite, ils pourraient
+// être devinés par force brute. Réglables pour les tests de bout en bout, qui
+// créent de nombreux salons depuis la même adresse.
+export const RATE_LIMITS = {
+  failedJoinsPer10Min: Number(process.env.FAILED_JOINS_PER_10_MIN) || 10,
+  creationsPerHour: Number(process.env.ROOM_CREATIONS_PER_HOUR) || 10,
+};

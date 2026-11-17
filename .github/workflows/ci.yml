@@ -1,15 +1,20 @@
 name: CI
 on: [push, pull_request]
+
 jobs:
   backend:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: backend } }
+    env:
+      # Les tests unitaires n'utilisent pas MongoDB : inutile de le télécharger.
+      MONGOMS_DISABLE_POSTINSTALL: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm, cache-dependency-path: backend/package-lock.json }
       - run: npm ci
       - run: npm test
+
   frontend:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: frontend } }
@@ -20,3 +25,33 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+
+  # Tests de bout en bout : vrais navigateurs, backend et base MongoDB locale.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+            e2e/package-lock.json
+      - name: Build Angular
+        working-directory: frontend
+        run: npm ci && npm run build
+      - name: Dépendances du backend (avec MongoDB local)
+        working-directory: backend
+        run: npm ci
+      - name: Playwright et Chromium
+        working-directory: e2e
+        run: npm ci && npx playwright install --with-deps chromium
+      - name: Tests de bout en bout
+        working-directory: e2e
+        run: npx playwright test
+      - name: Traces des tests en échec
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with: { name: playwright-traces, path: e2e/test-results, retention-days: 7 }

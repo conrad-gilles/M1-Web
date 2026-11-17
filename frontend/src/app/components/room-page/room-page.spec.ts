@@ -178,6 +178,81 @@ describe('RoomPageComponent', () => {
     expect(TestBed.inject(RoomSessionService).session()).toBeNull();
   });
 
+  describe('copie du lien', () => {
+    const clipboard = (writeText: () => Promise<void>) =>
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn(writeText) } });
+
+    afterEach(() => Reflect.deleteProperty(navigator, 'clipboard'));
+
+    it('copie le lien du salon et le confirme', async () => {
+      create();
+      clipboard(() => Promise.resolve());
+
+      await component.copyLink();
+
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(`${location.origin}/rooms/K7P2QX`);
+      expect(snackBar.open).toHaveBeenCalledWith('Lien du salon copié.', 'OK', expect.anything());
+    });
+
+    it('donne le code à partager quand le presse-papiers est refusé', async () => {
+      create();
+      clipboard(() => Promise.reject(new DOMException('refusé', 'NotAllowedError')));
+
+      await component.copyLink();
+
+      expect(snackBar.open).toHaveBeenCalledWith('Copie impossible. Partagez le code K7P2QX.', 'OK', expect.anything());
+    });
+  });
+
+  describe('erreurs des actions', () => {
+    const serverError = { status: 500, statusText: 'Erreur' };
+
+    it('quitter : affiche l’erreur et reste dans le salon', () => {
+      create();
+
+      component.leave();
+      http.expectOne('/api/rooms/current/leave').flush({ message: 'Erreur interne du serveur' }, serverError);
+
+      expect(snackBar.open).toHaveBeenCalledWith('Erreur interne du serveur', 'OK', expect.anything());
+      expect(component.busy()).toBe(false);
+      expect(navigate).not.toHaveBeenCalled();
+    });
+
+    it("changer le code : affiche l'erreur et garde l'ancien code", () => {
+      create({ host: true });
+
+      component.changeCode();
+      http.expectOne('/api/rooms/current/code').flush({}, serverError);
+
+      expect(snackBar.open).toHaveBeenCalledWith('Impossible de changer le code.', 'OK', expect.anything());
+      expect(component.code()).toBe('K7P2QX');
+      expect(component.busy()).toBe(false);
+    });
+
+    it('fermer le salon : affiche le refus du serveur et reste dans le salon', () => {
+      create({ host: true });
+
+      component.closeRoom();
+      http
+        .expectOne({ method: 'DELETE', url: '/api/rooms/current' })
+        .flush({ message: "Action réservée à l'hôte du salon" }, { status: 403, statusText: 'Forbidden' });
+
+      expect(snackBar.open).toHaveBeenCalledWith("Action réservée à l'hôte du salon", 'OK', expect.anything());
+      expect(TestBed.inject(RoomSessionService).session()).not.toBeNull();
+    });
+
+    it('ignore un second clic pendant qu’une action est en cours', () => {
+      create({ host: true });
+
+      component.leave();
+      component.leave();
+      component.changeCode();
+      component.closeRoom();
+
+      http.expectOne('/api/rooms/current/leave').flush(null, { status: 204, statusText: 'No Content' });
+    });
+  });
+
   describe('temps réel', () => {
     it('ouvre le WebSocket avec le jeton de salon et le ferme en quittant la page', () => {
       create();
