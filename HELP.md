@@ -96,8 +96,10 @@ npm install --legacy-peer-deps
 
 There are no accounts anymore. On the home page, enter a display name and
 create a room, then share its 6-character code (or the room link). Others join
-with the code and a display name. Two tabs of the same browser are two
-participants, which is handy to test alone.
+with the code and a display name. The session belongs to the whole browser:
+several tabs on the room are the same participant, and the host keeps their
+rights after closing and reopening the tab. To test alone with several
+participants, use a private window or another browser.
 
 ## 4. Stop the servers
 

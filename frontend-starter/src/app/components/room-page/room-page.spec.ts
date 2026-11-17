@@ -79,7 +79,7 @@ describe('RoomPageComponent', () => {
   };
 
   beforeEach(() => {
-    sessionStorage.clear();
+    localStorage.clear();
     navigate = vi.fn().mockResolvedValue(true);
     snackBar = { open: vi.fn() };
     confirmSpy = vi.spyOn(globalThis, 'confirm').mockReturnValue(true);
@@ -103,7 +103,7 @@ describe('RoomPageComponent', () => {
   afterEach(() => {
     http.verify();
     confirmSpy.mockRestore();
-    sessionStorage.clear();
+    localStorage.clear();
   });
 
   it('affiche le code du salon et ses participants', () => {
@@ -272,11 +272,55 @@ describe('RoomPageComponent', () => {
       expect(navigate).toHaveBeenCalledWith(['/rooms', 'NEW234'], { replaceUrl: true });
     });
 
+    describe('autre onglet du même navigateur', () => {
+      const otherTab = (session: object | null) => {
+        if (session) localStorage.setItem('gpc_room_session', JSON.stringify(session));
+        else localStorage.removeItem('gpc_room_session');
+        window.dispatchEvent(new StorageEvent('storage', { key: 'gpc_room_session' }));
+      };
+
+      it("revient à l'accueil quand le salon est quitté dans un autre onglet", () => {
+        create();
+
+        otherTab(null);
+
+        expect(navigate).toHaveBeenCalledWith(['/']);
+      });
+
+      it("revient à l'accueil quand un autre onglet rejoint un autre salon", () => {
+        create();
+
+        otherTab({ code: 'AUTRE2', token: 'autre-jeton', participant: { id: 'p9', name: 'Alex' } });
+
+        expect(navigate).toHaveBeenCalledWith(['/']);
+      });
+
+      it('sans message « salon fermé » quand le salon a été quitté dans un autre onglet', () => {
+        create();
+        goOnline();
+
+        // Le serveur prévient avant que l'autre onglet ait vidé la session.
+        socket.receive('room:closed', { reason: 'left' });
+
+        expect(navigate).toHaveBeenCalledWith(['/']);
+        expect(navigate).not.toHaveBeenCalledWith(['/'], { queryParams: { closed: 1 } });
+        expect(TestBed.inject(RoomSessionService).session()).toBeNull();
+      });
+
+      it('reste dans le salon quand un autre onglet ne change que le code', () => {
+        create();
+
+        otherTab({ code: 'NEW234', token: 'jeton', participant: { id: 'p1', name: 'Alex' } });
+
+        expect(navigate).not.toHaveBeenCalledWith(['/']);
+      });
+    });
+
     it("revient à l'accueil quand le salon est fermé pour tout le monde", () => {
       create();
       goOnline();
 
-      socket.receive('room:closed');
+      socket.receive('room:closed', { reason: 'closed' });
 
       expect(TestBed.inject(RoomSessionService).session()).toBeNull();
       expect(navigate).toHaveBeenCalledWith(['/'], { queryParams: { closed: 1 } });

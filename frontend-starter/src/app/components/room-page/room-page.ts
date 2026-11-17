@@ -73,8 +73,24 @@ export class RoomPageComponent implements OnDestroy {
       this.applyRoom(room);
     });
 
+    // Un autre onglet a quitté ce salon ou en a rejoint un autre : ce jeton
+    // n'est plus celui du navigateur, cette page n'a plus lieu d'être.
+    const joinedWith = token;
+    this.sessionService.changedElsewhere$.pipe(takeUntilDestroyed()).subscribe((session) => {
+      if (session?.token === joinedWith) return; // simple changement de code
+      console.debug('[RoomPage] Session changée dans un autre onglet');
+      void this.router.navigate(['/']);
+    });
+
     // Salon fermé par l'hôte, expiré, ou jeton refusé.
-    this.sync.roomClosed$.pipe(takeUntilDestroyed()).subscribe(() => {
+    this.sync.roomClosed$.pipe(takeUntilDestroyed()).subscribe((reason) => {
+      // Quitté (ici ou dans un autre onglet), ou session remplacée dans un autre
+      // onglet : pas de message « salon fermé ».
+      if (reason === 'left' || this.sessionService.refresh()?.token !== joinedWith) {
+        this.sessionService.close();
+        void this.router.navigate(['/']);
+        return;
+      }
       console.warn('[RoomPage] Le salon n’est plus accessible');
       this.sessionService.close();
       void this.router.navigate(['/'], { queryParams: { closed: 1 } });

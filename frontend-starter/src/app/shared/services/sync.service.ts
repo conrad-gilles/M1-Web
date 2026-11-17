@@ -35,6 +35,13 @@ const CLOCK_SAMPLES = 5;
 export type SyncStatus = 'offline' | 'connecting' | 'online';
 
 /**
+ * Pourquoi le salon n'est plus accessible : fermé par l'hôte ou expiré
+ * (`closed`), quitté par ce participant, éventuellement dans un autre onglet
+ * (`left`), jeton expiré (`expired`) ou jeton refusé à la connexion (`refused`).
+ */
+export type RoomClosedReason = 'closed' | 'left' | 'expired' | 'refused';
+
+/**
  * Real-time channel of a room: shared playback state, presence, clock offset.
  *
  * Le serveur est la seule source de vérité. Ce service envoie des commandes
@@ -59,7 +66,7 @@ export class SyncService {
   private readonly changeSubject = new Subject<PlaybackChange>();
   private readonly mediaChangedSubject = new Subject<void>();
   private readonly roomUpdatedSubject = new Subject<Room>();
-  private readonly roomClosedSubject = new Subject<void>();
+  private readonly roomClosedSubject = new Subject<RoomClosedReason>();
 
   /** Chaque changement d'état, avec son auteur (pour les notices). */
   readonly changes$ = this.changeSubject.asObservable();
@@ -102,7 +109,9 @@ export class SyncService {
     socket.on('room:participants', (participants: Participant[]) => this.participants.set(participants));
     socket.on('media:changed', () => this.mediaChangedSubject.next());
     socket.on('room:updated', (room: Room) => this.roomUpdatedSubject.next(room));
-    socket.on('room:closed', () => this.roomClosedSubject.next());
+    socket.on('room:closed', (event?: { reason?: RoomClosedReason }) =>
+      this.roomClosedSubject.next(event?.reason ?? 'closed'),
+    );
 
     socket.on('disconnect', (reason: string) => {
       console.warn('[Sync] Déconnecté', reason);
@@ -113,7 +122,7 @@ export class SyncService {
     socket.on('connect_error', (error: Error) => {
       console.error('[Sync] Connexion refusée ou impossible', error.message);
       // Un refus d'authentification est définitif : le salon n'est plus accessible.
-      if (error.message === 'Salon fermé ou jeton invalide') this.roomClosedSubject.next();
+      if (error.message === 'Salon fermé ou jeton invalide') this.roomClosedSubject.next('refused');
     });
   }
 

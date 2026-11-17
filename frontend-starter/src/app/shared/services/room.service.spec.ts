@@ -19,7 +19,7 @@ describe('RoomService', () => {
   let http: HttpTestingController;
 
   beforeEach(() => {
-    sessionStorage.clear();
+    localStorage.clear();
     TestBed.configureTestingModule({
       providers: [provideHttpClient(), provideHttpClientTesting()],
     });
@@ -30,7 +30,7 @@ describe('RoomService', () => {
 
   afterEach(() => {
     http.verify();
-    sessionStorage.clear();
+    localStorage.clear();
   });
 
   it('create() envoie POST /api/rooms avec le nom, puis ouvre la session hôte', () => {

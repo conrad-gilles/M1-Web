@@ -23,12 +23,12 @@ describe('roomGuard', () => {
     });
 
   beforeEach(() => {
-    sessionStorage.clear();
+    localStorage.clear();
     session = TestBed.inject(RoomSessionService);
     router = TestBed.inject(Router);
   });
 
-  afterEach(() => sessionStorage.clear());
+  afterEach(() => localStorage.clear());
 
   it("sans session : redirige vers l'accueil avec le code du lien prérempli", () => {
     const result = run('k7p2qx');

@@ -36,13 +36,11 @@ describe('HomePageComponent', () => {
   const text = () => (fixture.nativeElement as HTMLElement).textContent ?? '';
 
   beforeEach(() => {
-    sessionStorage.clear();
     localStorage.clear();
   });
 
   afterEach(() => {
     http.verify();
-    sessionStorage.clear();
     localStorage.clear();
   });
 
@@ -133,7 +131,7 @@ describe('HomePageComponent', () => {
   });
 
   it('propose de retourner dans le salon en cours', () => {
-    sessionStorage.setItem(
+    localStorage.setItem(
       'gpc_room_session',
       JSON.stringify({ code: 'K7P2QX', token: 'jeton', participant: { id: 'p1', name: 'Alex' } }),
     );

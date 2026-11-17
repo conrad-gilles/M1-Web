@@ -255,7 +255,9 @@ test("fermeture du salon : tout le monde est prévenu puis déconnecté", async 
     headers: { "x-host-token": host.hostToken },
   });
 
-  await Promise.all([...closed, ...disconnected]);
+  const reasons = await Promise.all(closed);
+  await Promise.all(disconnected);
+  assert.deepEqual(reasons, [{ reason: "closed" }, { reason: "closed" }]);
   assert.equal(alex.connected, false);
   assert.equal(sam.connected, false);
 });
@@ -264,11 +266,13 @@ test("quitter le salon ferme le WebSocket du participant, pas celui des autres",
   const { guest, alex, sam } = await roomWithTwoPeople();
 
   const disconnected = sam.next("disconnect");
+  const notified = sam.next("room:closed");
   // L'annonce de l'arrivée de Sam peut encore être en route : on attend la
   // liste où il ne figure plus.
   const alone = alex.until("room:participants", (list) => list.length === 1);
   await t.json("POST", "/api/rooms/current/leave", { token: guest.token });
 
+  assert.deepEqual(await notified, { reason: "left" });
   await disconnected;
   assert.deepEqual((await alone).map((p) => p.name), ["Alex"]);
   assert.equal(alex.connected, true);

@@ -17,7 +17,7 @@ describe('roomTokenInterceptor', () => {
     });
 
   beforeEach(() => {
-    sessionStorage.clear();
+    localStorage.clear();
     TestBed.configureTestingModule({
       providers: [provideHttpClient(withInterceptors([roomTokenInterceptor])), provideHttpClientTesting()],
     });
@@ -28,7 +28,7 @@ describe('roomTokenInterceptor', () => {
 
   afterEach(() => {
     controller.verify();
-    sessionStorage.clear();
+    localStorage.clear();
   });
 
   it('ajoute Authorization: Bearer <jeton de salon> quand une session existe', () => {

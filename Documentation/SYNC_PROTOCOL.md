@@ -60,7 +60,7 @@ Quand aucun média n'est chargé, `playback` vaut `null`.
 | `room:participants` | `[{ id, name }]` | Liste des participants connectés, à chaque arrivée ou départ. |
 | `media:changed` | - | Un média a été ajouté ou supprimé : recharger la liste. |
 | `room:updated` | `Room` | L'hôte a changé le code du salon. |
-| `room:closed` | - | Salon fermé ou expiré, participant sorti, jeton expiré. La connexion est ensuite fermée. |
+| `room:closed` | `{ reason }` | Le salon n'est plus accessible, puis la connexion est fermée. `reason` : `closed` (fermé par l'hôte ou expiré), `left` (ce participant a quitté le salon, par exemple dans un autre onglet du même navigateur), `expired` (jeton de salon expiré). |
 
 ### Client → serveur
 

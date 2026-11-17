@@ -52,7 +52,7 @@ describe('MediaLibraryComponent', () => {
   };
 
   beforeEach(() => {
-    sessionStorage.clear();
+    localStorage.clear();
     snackBar = { open: vi.fn() };
     confirmSpy = vi.spyOn(globalThis, 'confirm').mockReturnValue(true);
     TestBed.configureTestingModule({
@@ -68,7 +68,7 @@ describe('MediaLibraryComponent', () => {
   afterEach(() => {
     http.verify();
     confirmSpy.mockRestore();
-    sessionStorage.clear();
+    localStorage.clear();
   });
 
   describe('bibliothèque', () => {

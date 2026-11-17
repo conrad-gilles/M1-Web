@@ -235,15 +235,16 @@ describe('SyncService', () => {
       const events: string[] = [];
       service.mediaChanged$.subscribe(() => events.push('media'));
       service.roomUpdated$.subscribe((room) => events.push(`code ${room.code}`));
-      service.roomClosed$.subscribe(() => events.push('fermé'));
+      service.roomClosed$.subscribe((reason) => events.push(`fermé (${reason})`));
 
       socket().receive('room:participants', [ALEX, SAM]);
       socket().receive('media:changed');
       socket().receive('room:updated', { code: 'NEW234', participants: [], expiresAt: '' });
-      socket().receive('room:closed');
+      socket().receive('room:closed', { reason: 'closed' });
+      socket().receive('room:closed', { reason: 'left' });
 
       expect(service.participants()).toEqual([ALEX, SAM]);
-      expect(events).toEqual(['media', 'code NEW234', 'fermé']);
+      expect(events).toEqual(['media', 'code NEW234', 'fermé (closed)', 'fermé (left)']);
     });
 
     it('un refus d’authentification signale que le salon n’est plus accessible', () => {

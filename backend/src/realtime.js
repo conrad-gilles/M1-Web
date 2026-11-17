@@ -91,7 +91,7 @@ export function attachRealtime(httpServer, { now = Date.now } = {}) {
     function stillAllowed() {
       if (now() < socket.data.expiresAt) return true;
       console.warn(`[sync] Jeton expiré pour ${participant.id}, déconnexion`);
-      socket.emit("room:closed");
+      socket.emit("room:closed", { reason: "expired" });
       socket.disconnect(true);
       return false;
     }
@@ -153,7 +153,7 @@ export function attachRealtime(httpServer, { now = Date.now } = {}) {
     "media:removed": (roomId, mediaId) => hubs.get(roomId)?.sync.mediaRemoved(mediaId),
     "room:updated": (roomId, room) => io.to(roomId).emit("room:updated", room),
     "room:closed": (roomId) => {
-      io.to(roomId).emit("room:closed");
+      io.to(roomId).emit("room:closed", { reason: "closed" });
       io.in(roomId).disconnectSockets(true);
       hubs.get(roomId)?.sync.dispose();
       hubs.delete(roomId);
@@ -163,7 +163,7 @@ export function attachRealtime(httpServer, { now = Date.now } = {}) {
       // Son jeton ne vaut plus rien : ses connexions sont fermées.
       for (const socket of await io.in(roomId).fetchSockets()) {
         if (socket.data.participant.id === participantId) {
-          socket.emit("room:closed");
+          socket.emit("room:closed", { reason: "left" });
           socket.disconnect(true);
         }
       }

@@ -12,8 +12,8 @@ const access = (overrides: Partial<RoomAccess> = {}): RoomAccess => ({
 describe('RoomSessionService', () => {
   const create = () => TestBed.inject(RoomSessionService);
 
-  beforeEach(() => sessionStorage.clear());
-  afterEach(() => sessionStorage.clear());
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
 
   it('démarre sans session', () => {
     const service = create();
@@ -46,7 +46,7 @@ describe('RoomSessionService', () => {
     expect(service.session()?.hostToken).toBe('secret-hote');
   });
 
-  it('la session survit à un rechargement de la page (sessionStorage)', () => {
+  it('la session survit à un rechargement et à la fermeture de l’onglet (localStorage)', () => {
     create().open(access({ hostToken: 'secret-hote' }));
     TestBed.resetTestingModule();
 
@@ -64,7 +64,7 @@ describe('RoomSessionService', () => {
 
     expect(service.session()?.code).toBe('NEW234');
     expect(service.token()).toBe('jeton-de-salon');
-    expect(JSON.parse(sessionStorage.getItem('gpc_room_session') ?? '{}').code).toBe('NEW234');
+    expect(JSON.parse(localStorage.getItem('gpc_room_session') ?? '{}').code).toBe('NEW234');
   });
 
   it('close() oublie la session', () => {
@@ -74,15 +74,73 @@ describe('RoomSessionService', () => {
     service.close();
 
     expect(service.session()).toBeNull();
-    expect(sessionStorage.getItem('gpc_room_session')).toBeNull();
+    expect(localStorage.getItem('gpc_room_session')).toBeNull();
   });
 
   it('ignore une session stockée illisible ou incomplète', () => {
     for (const stored of ['pas-du-json', '{"code":"K7P2QX"}', 'null']) {
-      sessionStorage.setItem('gpc_room_session', stored);
+      localStorage.setItem('gpc_room_session', stored);
       TestBed.resetTestingModule();
 
       expect(create().session()).toBeNull();
     }
+  });
+
+  describe('plusieurs onglets du même navigateur', () => {
+    /** Simule un autre onglet qui écrit la session, puis l'événement "storage" reçu ici. */
+    const otherTab = (value: string | null) => {
+      if (value === null) localStorage.removeItem('gpc_room_session');
+      else localStorage.setItem('gpc_room_session', value);
+      window.dispatchEvent(new StorageEvent('storage', { key: 'gpc_room_session', newValue: value }));
+    };
+
+    it('un nouvel onglet reprend la session du navigateur : même participant, droits d’hôte compris', () => {
+      create().open(access({ hostToken: 'secret-hote' }));
+      TestBed.resetTestingModule();
+
+      const secondTab = create();
+
+      expect(secondTab.session()?.participant.id).toBe('p1');
+      expect(secondTab.isHost()).toBe(true);
+    });
+
+    it('suit la session quand un autre onglet quitte le salon ou en rejoint un autre', () => {
+      const service = create();
+      service.open(access());
+      const seen: (string | null)[] = [];
+      service.changedElsewhere$.subscribe((session) => seen.push(session?.code ?? null));
+
+      otherTab(JSON.stringify({ code: 'NEW234', token: 'autre-jeton', participant: { id: 'p9', name: 'Alex' } }));
+      expect(service.session()?.code).toBe('NEW234');
+
+      otherTab(null);
+      expect(service.session()).toBeNull();
+
+      expect(seen).toEqual(['NEW234', null]);
+    });
+
+    it('ignore les autres clés de localStorage', () => {
+      const service = create();
+      service.open(access());
+      let changes = 0;
+      service.changedElsewhere$.subscribe(() => (changes += 1));
+
+      window.dispatchEvent(new StorageEvent('storage', { key: 'gpc_display_name', newValue: 'Sam' }));
+
+      expect(changes).toBe(0);
+      expect(service.session()?.code).toBe('K7P2QX');
+    });
+
+    it('les changements faits dans cet onglet ne sont pas signalés comme venant d’ailleurs', () => {
+      const service = create();
+      let changes = 0;
+      service.changedElsewhere$.subscribe(() => (changes += 1));
+
+      service.open(access());
+      service.updateCode('NEW234');
+      service.close();
+
+      expect(changes).toBe(0);
+    });
   });
 });

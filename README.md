@@ -42,7 +42,9 @@ npm start
 
 Ouvrir `http://localhost:4200`. Il n'y a pas de compte : créer un salon avec un
 nom d'affichage, puis partager son code (ou son lien) pour que d'autres le
-rejoignent. Deux onglets du même navigateur comptent comme deux participants.
+rejoignent. Une session vaut pour tout le navigateur : plusieurs onglets ouverts
+sur le salon sont le même participant. Pour tester seul avec plusieurs
+participants, ouvrir une fenêtre de navigation privée ou un autre navigateur.
 
 ## Documents de travail
 

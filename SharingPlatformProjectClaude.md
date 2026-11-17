@@ -552,8 +552,9 @@ Choices made while implementing, to review:
 - **Rate limits per IP address:** 10 wrong codes per 10 minutes, 10 rooms created per hour. Behind
   Render's proxy, set `TRUST_PROXY=1` so the client address is used.
 - **CORS is closed by default** (same origin). `CORS_ORIGIN` opens it for a frontend hosted elsewhere.
-- **The room session lives in `sessionStorage`:** it survives a reload, and two tabs of one browser
-  are two participants. Closing the host's tab loses the host token.
+- **One session per browser (`localStorage`):** every tab of a browser is the same participant, and
+  the host keeps their rights after closing the tab. Leaving the room in one tab leaves it in all of
+  them. To test alone with several participants, use a private window or another browser.
 - **The player has no native controls:** buttons send commands, the player only applies the shared
   state, so echo loops cannot happen (§5 rule 4).
 - **Loading a media leaves it paused at 0 s**; anyone then presses play.

@@ -12,7 +12,7 @@ describe('roomClosedInterceptor', () => {
   let navigate: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    sessionStorage.clear();
+    localStorage.clear();
     navigate = vi.fn().mockResolvedValue(true);
     TestBed.configureTestingModule({
       providers: [
@@ -33,7 +33,7 @@ describe('roomClosedInterceptor', () => {
 
   afterEach(() => {
     controller.verify();
-    sessionStorage.clear();
+    localStorage.clear();
   });
 
   it("401 : oublie la session, revient à l'accueil et laisse passer l'erreur", () => {
