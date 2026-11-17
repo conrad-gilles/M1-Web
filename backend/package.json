@@ -1,5 +1,5 @@
 {
-    "name": "gpc-api",
+    "name": "sharing-platform-api",
     "version": "3.0.0",
     "type": "module",
     "scripts": {

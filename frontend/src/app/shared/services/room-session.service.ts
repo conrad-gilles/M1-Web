@@ -3,7 +3,7 @@ import { Subject } from 'rxjs';
 import { RoomAccess } from '../models/room-access.model';
 import { RoomSession } from '../models/room-session.model';
 
-const STORAGE_KEY = 'gpc_room_session';
+const STORAGE_KEY = 'sharing_platform_session';
 
 /**
  * Holds the current room session (room token, participant, host token).

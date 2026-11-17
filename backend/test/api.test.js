@@ -299,7 +299,7 @@ test("CORS : fermé par défaut, ouvert seulement aux origines de CORS_ORIGIN", 
  * ---------------------------------------------------------------------- */
 
 test("le build Angular est servi, sans masquer les routes /api", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gpc-front-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sharing-platform-front-"));
   fs.writeFileSync(path.join(dir, "index.html"), "<html>angular</html>");
   fs.writeFileSync(path.join(dir, "main.js"), "console.log('main')");
 

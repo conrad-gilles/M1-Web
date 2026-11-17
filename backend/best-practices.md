@@ -20,7 +20,7 @@ Une requête suit généralement ce chemin :
 route -> middleware -> handler/controller -> modèle Mongoose -> MongoDB
 ```
 
-- Les routes décrivent les URL et les méthodes HTTP. Toute route ajoutée ou modifiée doit entraîner la mise à jour de `../API_CONTRACT.md` dans la même mission, avec la méthode, l’URL, l’authentification, les paramètres, le corps, les réponses et les erreurs.
+- Les routes décrivent les URL et les méthodes HTTP. Toute route ajoutée ou modifiée doit entraîner la mise à jour de `../Documentation/API_CONTRACT.md` dans la même mission, avec la méthode, l’URL, l’authentification, les paramètres, le corps, les réponses et les erreurs.
 - Les middlewares traitent l’authentification, la validation, les logs ou les fichiers reçus.
 - Un handler orchestre l’opération et renvoie une réponse une seule fois.
 - Utiliser des codes HTTP cohérents : `2xx` succès, `4xx` requête invalide ou non autorisée, `5xx` erreur serveur.
@@ -56,7 +56,7 @@ Documentation : [middleware Express](https://expressjs.com/en/guide/using-middle
 - Sélectionner uniquement les champs nécessaires, notamment lorsqu’un document contient des informations sensibles.
 - Ajouter des index seulement lorsqu’ils correspondent à des recherches réelles et comprendre leur coût en écriture.
 - Pour une liste paginée, valider `page` et `limit`, imposer un maximum et retourner des métadonnées cohérentes.
-- Ne jamais stocker un mot de passe en clair et ne jamais le renvoyer dans une réponse JSON.
+- Ne jamais stocker un secret en clair (le jeton d'hôte est conservé sous forme d'empreinte) ni le renvoyer dans une réponse JSON.
 
 Documentation : [Mongoose Schemas](https://mongoosejs.com/docs/guide.html) et
 [sécurité MongoDB](https://www.mongodb.com/docs/manual/core/security/).
@@ -83,21 +83,22 @@ Bonnes pratiques :
 - supprimer le fichier si l’écriture MongoDB échoue après l’upload, ou prévoir un nettoyage ;
 - pour des fichiers volumineux, réfléchir au streaming et aux téléchargements partiels.
 
-## Lecture audio et authentification
+## Salons, lecture et temps réel
 
-- Utiliser un chemin de fichier contrôlé par le serveur, jamais un chemin fourni directement par le client.
-- Authentifier les pistes protégées avant d’envoyer le fichier.
-- Préserver les en-têtes et le comportement nécessaires à la lecture audio, notamment `Range` si pris en charge.
-- Vérifier l’identité issue du JWT plutôt que celle fournie par `req.body`.
-- Distinguer absence de token, token invalide et utilisateur non autorisé.
+- L'identité vient toujours du jeton de salon vérifié (`req.room`, `req.participant`, `socket.data`), jamais de `req.body` ni d'un message Socket.IO.
+- Distinguer jeton absent (`401`), jeton invalide ou salon fermé (`401`), action réservée à l'hôte (`403`) et ressource d'un autre salon (`404`).
+- Un média se lit par une URL signée, temporaire et limitée à ce média ; préserver le comportement `Range` (`206 Partial Content`) nécessaire au streaming.
+- Utiliser un chemin de fichier contrôlé par le serveur (module de stockage), jamais un chemin fourni par le client.
+- Le serveur est la seule source de vérité de la lecture : une commande reçue est validée, horodatée, versionnée puis diffusée à tout le salon.
+- Tester la logique de synchronisation avec une horloge et des minuteurs simulés, et le temps réel avec de vrais clients Socket.IO.
 
 ## Logs, erreurs et tests
 
 Chaque opération importante doit laisser une trace utile : début, résultat et
 erreur éventuelle. Ne jamais utiliser de `catch` vide et ne jamais journaliser
-mot de passe, token, secret, URI MongoDB complète ou contenu privé.
+secret, jeton, URI MongoDB complète ou contenu privé.
 
-Tester les cas nominaux et les erreurs : données invalides, absence de JWT,
+Tester les cas nominaux et les erreurs : données invalides, absence de jeton,
 ressource inexistante, doublon, fichier trop grand et mauvais type. Vérifier le
 code HTTP, le JSON, les effets dans MongoDB ou sur le disque, puis lire les logs
 du backend.
@@ -106,7 +107,7 @@ du backend.
 
 ```text
 Lis backend/AGENTS.md, backend/best-practices.md et les parties pertinentes de
-API_CONTRACT.md. Analyse d’abord la route concernée, décris son flux et propose
+Documentation/API_CONTRACT.md et Documentation/SYNC_PROTOCOL.md. Analyse d’abord la route concernée, décris son flux et propose
 les fichiers à modifier. Ne change pas le contrat API sans mettre à jour
 `API_CONTRACT.md` dans la même mission et ne touche jamais aux secrets. Après
 validation, implémente une modification limitée, lance les tests et signale

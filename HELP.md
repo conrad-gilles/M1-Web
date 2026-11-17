@@ -1,4 +1,4 @@
-# Help — Running the Guitar Practice Cloud project
+# Help — Running the Sharing Platform project
 
 This file summarizes everything needed to start the project again (backend +
 frontend) after a restart, closed terminals, etc. It is not required by the
@@ -44,7 +44,7 @@ French):
 
 ```text
 [startup] Connecté à MongoDB Atlas
-[startup] La base guitar-practice-cloud est prête à recevoir des données
+[startup] La base est prête à recevoir des données
 [storage] Stockage local prêt : .../backend/data/uploads
 Sharing Platform API: http://localhost:3000/api/health
 ```
@@ -76,7 +76,7 @@ Atlas; use `npm start` again once Atlas is reachable.
 In a **second** terminal (leave the first one running):
 
 ```bash
-cd frontend-starter
+cd frontend
 npm install       # only if node_modules was deleted
 npm start
 ```
@@ -112,7 +112,7 @@ In each terminal, `Ctrl + C`.
 cd backend && npm start
 
 # Terminal 2
-cd frontend-starter && npm start
+cd frontend && npm start
 
 # Browser
 http://localhost:4200
@@ -125,6 +125,6 @@ http://localhost:4200
 | `ng serve`/`ng build` refuses to start, Node version error | Node too old | `winget upgrade OpenJS.NodeJS.22` (or reinstall Node ≥ 22.22.3) then open a new terminal |
 | `Cannot read properties of null (reading 'edgesOut')` during `npm install` | npm/Arborist bug with peer deps | `rm -rf node_modules package-lock.json && npm install --legacy-peer-deps` |
 | Backend: `Échec de connexion à MongoDB` (MongoDB connection failed) | Wrong URI/password, or IP not allowed | Check `backend/.env`, check Atlas → Network Access → IP Access List |
-| Blank page or CORS/404 errors on `/api/...` | Backend not started, or `proxy.conf.json` misconfigured | Check that the backend is running on port 3000 and that `frontend-starter/proxy.conf.json` points to `http://localhost:3000` |
+| Blank page or CORS/404 errors on `/api/...` | Backend not started, or `proxy.conf.json` misconfigured | Check that the backend is running on port 3000 and that `frontend/proxy.conf.json` points to `http://localhost:3000` |
 | Sent back to the home page with "Ce salon a été fermé ou a expiré" | The room was closed by its host, expired after 24 h without activity, or the room token expired | Create a new room or join again with the code |
-| Upload rejected with an error message | Unsupported format (only MP3, WAV, OGG, M4A) or file > 25 MB | Check the file you are using, try the ones in `frontend-starter/fichiers-audio-de-test/` |
+| Upload rejected with an error message | Unsupported format (only MP3, WAV, OGG, M4A) or file > 25 MB | Check the file you are using, try the ones in `frontend/fichiers-audio-de-test/` |

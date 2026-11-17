@@ -64,7 +64,7 @@ describe('RoomSessionService', () => {
 
     expect(service.session()?.code).toBe('NEW234');
     expect(service.token()).toBe('jeton-de-salon');
-    expect(JSON.parse(localStorage.getItem('gpc_room_session') ?? '{}').code).toBe('NEW234');
+    expect(JSON.parse(localStorage.getItem('sharing_platform_session') ?? '{}').code).toBe('NEW234');
   });
 
   it('close() oublie la session', () => {
@@ -74,12 +74,12 @@ describe('RoomSessionService', () => {
     service.close();
 
     expect(service.session()).toBeNull();
-    expect(localStorage.getItem('gpc_room_session')).toBeNull();
+    expect(localStorage.getItem('sharing_platform_session')).toBeNull();
   });
 
   it('ignore une session stockée illisible ou incomplète', () => {
     for (const stored of ['pas-du-json', '{"code":"K7P2QX"}', 'null']) {
-      localStorage.setItem('gpc_room_session', stored);
+      localStorage.setItem('sharing_platform_session', stored);
       TestBed.resetTestingModule();
 
       expect(create().session()).toBeNull();
@@ -89,9 +89,9 @@ describe('RoomSessionService', () => {
   describe('plusieurs onglets du même navigateur', () => {
     /** Simule un autre onglet qui écrit la session, puis l'événement "storage" reçu ici. */
     const otherTab = (value: string | null) => {
-      if (value === null) localStorage.removeItem('gpc_room_session');
-      else localStorage.setItem('gpc_room_session', value);
-      window.dispatchEvent(new StorageEvent('storage', { key: 'gpc_room_session', newValue: value }));
+      if (value === null) localStorage.removeItem('sharing_platform_session');
+      else localStorage.setItem('sharing_platform_session', value);
+      window.dispatchEvent(new StorageEvent('storage', { key: 'sharing_platform_session', newValue: value }));
     };
 
     it('un nouvel onglet reprend la session du navigateur : même participant, droits d’hôte compris', () => {
@@ -125,7 +125,7 @@ describe('RoomSessionService', () => {
       let changes = 0;
       service.changedElsewhere$.subscribe(() => (changes += 1));
 
-      window.dispatchEvent(new StorageEvent('storage', { key: 'gpc_display_name', newValue: 'Sam' }));
+      window.dispatchEvent(new StorageEvent('storage', { key: 'sharing_platform_name', newValue: 'Sam' }));
 
       expect(changes).toBe(0);
       expect(service.session()?.code).toBe('K7P2QX');

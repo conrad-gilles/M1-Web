@@ -93,14 +93,14 @@ des commandes et modifier les fichiers selon les autorisations accordées.
 Lancez l’outil dans le dossier pertinent, par exemple :
 
 ```bash
-cd frontend-starter
+cd frontend
 claude
 ```
 
 ou :
 
 ```bash
-cd frontend-starter
+cd frontend
 gemini
 ```
 
@@ -113,7 +113,7 @@ Le starter contient plusieurs fichiers afin de fonctionner avec plusieurs
 assistants :
 
 ```text
-frontend-starter/
+frontend/
 ├── AGENTS.md
 ├── CLAUDE.md
 ├── GEMINI.md
@@ -334,7 +334,7 @@ estimation donnée par le modèle n’est pas une mesure officielle.
 
 Pour limiter une consommation inutile :
 
-- ouvrez le bon sous-projet, par exemple `frontend-starter` ;
+- ouvrez le bon sous-projet, par exemple `frontend` ;
 - fournissez les fichiers directement concernés et les interfaces appelées ;
 - résumez les essais précédents au lieu de conserver une conversation énorme ;
 - demandez une modification ciblée ;

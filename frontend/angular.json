@@ -1,7 +1,7 @@
 {
     "version": 1,
     "projects": {
-        "gpc": {
+        "sharing-platform": {
             "projectType": "application",
             "root": "",
             "sourceRoot": "src",
@@ -27,7 +27,7 @@
                     "builder": "@angular/build:dev-server",
                     "configurations": {
                         "development": {
-                            "buildTarget": "gpc:build"
+                            "buildTarget": "sharing-platform:build"
                         }
                     },
                     "defaultConfiguration": "development"
@@ -35,7 +35,7 @@
                 "test": {
                     "builder": "@angular/build:unit-test",
                     "options": {
-                        "buildTarget": "gpc:build",
+                        "buildTarget": "sharing-platform:build",
                         "tsConfig": "tsconfig.spec.json"
                     }
                 }

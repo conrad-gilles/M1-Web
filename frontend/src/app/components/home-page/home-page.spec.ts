@@ -55,7 +55,7 @@ describe('HomePageComponent', () => {
 
     expect(navigate).toHaveBeenCalledWith(['/rooms', 'K7P2QX']);
     expect(TestBed.inject(RoomSessionService).isHost()).toBe(true);
-    expect(localStorage.getItem('gpc_display_name')).toBe('Alex');
+    expect(localStorage.getItem('sharing_platform_name')).toBe('Alex');
   });
 
   it("n'envoie rien sans nom d'affichage valide", () => {
@@ -116,7 +116,7 @@ describe('HomePageComponent', () => {
   });
 
   it('préremplit le code venu d’un lien partagé et le nom mémorisé', () => {
-    localStorage.setItem('gpc_display_name', 'Alex');
+    localStorage.setItem('sharing_platform_name', 'Alex');
 
     create({ code: 'K7P2QX' });
 
@@ -132,7 +132,7 @@ describe('HomePageComponent', () => {
 
   it('propose de retourner dans le salon en cours', () => {
     localStorage.setItem(
-      'gpc_room_session',
+      'sharing_platform_session',
       JSON.stringify({ code: 'K7P2QX', token: 'jeton', participant: { id: 'p1', name: 'Alex' } }),
     );
 

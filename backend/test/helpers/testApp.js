@@ -17,7 +17,7 @@ import { installFakeDb } from "./fakeDb.js";
  */
 export async function startTestApp({ limits = { creationsPerHour: Infinity } } = {}) {
   const db = installFakeDb(Room, Media);
-  const uploadsDir = fs.mkdtempSync(path.join(os.tmpdir(), "gpc-uploads-"));
+  const uploadsDir = fs.mkdtempSync(path.join(os.tmpdir(), "sharing-platform-uploads-"));
   const storage = createLocalStorage({ directory: uploadsDir, secret: SECRET });
   const app = createApp({ storage, limits, frontendDir: path.join(uploadsDir, "aucun-build") });
   // Comme server.js : Express et Socket.IO partagent le même serveur HTTP.

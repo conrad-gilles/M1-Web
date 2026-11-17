@@ -274,9 +274,9 @@ describe('RoomPageComponent', () => {
 
     describe('autre onglet du même navigateur', () => {
       const otherTab = (session: object | null) => {
-        if (session) localStorage.setItem('gpc_room_session', JSON.stringify(session));
-        else localStorage.removeItem('gpc_room_session');
-        window.dispatchEvent(new StorageEvent('storage', { key: 'gpc_room_session' }));
+        if (session) localStorage.setItem('sharing_platform_session', JSON.stringify(session));
+        else localStorage.removeItem('sharing_platform_session');
+        window.dispatchEvent(new StorageEvent('storage', { key: 'sharing_platform_session' }));
       };
 
       it("revient à l'accueil quand le salon est quitté dans un autre onglet", () => {

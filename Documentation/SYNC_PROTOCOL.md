@@ -5,7 +5,7 @@ tolérances, règles de conflit et de buffering. Le contrat HTTP est dans
 [API_CONTRACT.md](API_CONTRACT.md).
 
 Code : `backend/src/realtime.js` et `backend/src/sync/` côté serveur,
-`frontend-starter/src/app/shared/sync/`, `shared/services/sync.service.ts` et
+`frontend/src/app/shared/sync/`, `shared/services/sync.service.ts` et
 `components/sync-player/` côté client.
 
 ## Principe

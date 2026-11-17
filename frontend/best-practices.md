@@ -19,7 +19,7 @@ You are an expert in TypeScript, Angular, and scalable web application developme
 - Use `input()` and `output()` functions instead of decorators for new APIs.
 - Use `providedIn: 'root'` for singleton services.
 - Organize reusable services, guards, interceptors, and models under `src/app/shared`.
-- Never put passwords, API keys, or JWT secrets in Angular source code.
+- Never put passwords, API keys, JWT secrets, or tokens in Angular source code.
 
 ## Accessibility
 

@@ -13,10 +13,10 @@ export const SECRET = process.env.JWT_SECRET || "tp1-development-secret";
 // Dossier de données du backend, indépendant du dossier courant du processus.
 export const DATA_DIR = path.resolve(import.meta.dirname, "../data");
 
-// Emplacement du build Angular (`npm run build` dans frontend-starter/).
+// Emplacement du build Angular (`npm run build` dans frontend/).
 export const FRONTEND_DIST = path.resolve(
   import.meta.dirname,
-  "../../frontend-starter/dist/gpc/browser",
+  "../../frontend/dist/sharing-platform/browser",
 );
 
 // Les fichiers plus gros sont refusés par Multer avant la fin de l'écriture.

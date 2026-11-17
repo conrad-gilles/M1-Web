@@ -5,7 +5,7 @@
 
 ## 1. The idea in one paragraph
 
-A "watch party" platform built on top of the current Guitar Practice Cloud app. A user uploads an
+A "watch party" platform built on top of the course's Guitar Practice Cloud app (the TP). A user uploads an
 audio or video file once, shares a short **room code**, and everyone who joins with it (no account
 needed) plays the same
 file at the same moment: play, pause, seek and "next file" are synchronized. Each participant
@@ -293,8 +293,12 @@ Sources: [B2 pricing](https://www.backblaze.com/cloud-storage/pricing),
 The whole app (Angular + Express API) runs as **one free Render web service**, connected to the public
 GitHub repo. MongoDB Atlas stays where it is. No service needs a card (§2).
 
-**Code changes needed before the first deploy** (roadmap step 1, §9; not made yet)
-- `backend/src/app.js`: when `frontend-starter/dist/gpc/browser/index.html` exists, serve that folder with
+**Branches.** `main` keeps the course TPs as they are. The project lives on **`sharing-platform`**: it is
+the deployed branch, the one CI must keep green, and the one personal branches (`gilles`, `reese`, ...)
+are merged into through pull requests.
+
+**Code changes needed before the first deploy** (roadmap step 1, §9; done)
+- `backend/src/app.js`: when `frontend/dist/sharing-platform/browser/index.html` exists, serve that folder with
   `express.static`, and answer every other `GET` outside `/api` with `index.html` so the Angular router
   handles `/tracks`, `/login`, etc. Placed after the API routes, before the error handler.
 - `backend/src/server.js`: refuse to start when `JWT_SECRET` is missing, like it already does for
@@ -317,11 +321,11 @@ jobs:
       - run: npm test
   frontend:
     runs-on: ubuntu-latest
-    defaults: { run: { working-directory: frontend-starter } }
+    defaults: { run: { working-directory: frontend } }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm, cache-dependency-path: frontend-starter/package-lock.json }
+        with: { node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json }
       - run: npm ci
       - run: npm test
       - run: npm run build
@@ -329,7 +333,7 @@ jobs:
 
 ```text
 push / PR ──► GitHub Actions (CI: backend tests, frontend tests, build)
-                    │ checks green on main
+                    │ checks green on sharing-platform
                     ▼
               Render: builds Angular, starts Express ──► MongoDB Atlas (free cluster)
               https://<service>.onrender.com
@@ -338,7 +342,7 @@ push / PR ──► GitHub Actions (CI: backend tests, frontend tests, build)
 **How it works**
 1. Anyone pushes to any branch or opens a pull request → CI runs all tests (GitHub Actions is free for
    public repos).
-2. A merge (or push) to `main` → Render waits until CI is green, then redeploys automatically.
+2. A merge (or push) to `sharing-platform` → Render waits until CI is green, then redeploys automatically.
 3. Commits that only touch documentation do not redeploy (build filters below).
 4. The database needs no redeploy: Mongoose creates collections and indexes when the server starts.
    Data migrations, if ever needed, would be a separate script.
@@ -349,7 +353,7 @@ Angular's relative `/api/...` calls work as in development.
 **Step 1 setup: MongoDB Atlas** (roadmap step 1, §9)
 - **Network Access:** Render's free plan has no fixed IP. Add the outbound IPs shown in the Render
   service (Connect → Outbound), or `0.0.0.0/0` with a strong database password.
-- Use a separate database name for production (for example `guitar-practice-prod` in the URI) so
+- Use a separate database name for production (`sharing-platform-prod` in the URI) so
   development data stays apart.
 
 **Step 1 setup: Render service (dashboard, not Blueprint)**
@@ -360,12 +364,12 @@ does not.
 
 | Setting | Value |
 |---|---|
-| Branch | `main` |
+| Branch | `sharing-platform` |
 | Region | Frankfurt |
 | Root Directory | *(empty)* |
 | Runtime | Node |
-| Build Command | `cd frontend-starter && npm ci && npm run build && cd ../backend && npm ci` |
-| Start Command | `cd backend && node src/server.js` |
+| Build Command | `cd frontend && npm ci && npm run build && cd ../backend && npm ci --omit=dev` |
+| Start Command | `cd backend && node src/server.js` (not `npm start`, which needs a `.env` file) |
 | Instance Type | **Free** |
 
 Environment variables (Render dashboard only, never in Git):
@@ -375,6 +379,7 @@ Environment variables (Render dashboard only, never in Git):
 | `MONGODB_URI` | The Atlas URI with the production database name |
 | `JWT_SECRET` | A long random string: `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"` |
 | `NODE_VERSION` | `22` |
+| `TRUST_PROXY` | `1`, so rate limits per IP see the visitor's address behind Render's proxy |
 
 The server refuses to start without `JWT_SECRET`: the fallback secret in `app.js` is visible in the
 public repo, so anyone could forge tokens with it. The B2 settings (`S3_*`, §7.1) join this list in
@@ -385,17 +390,17 @@ phase 3.4.
 In the service's **Settings**:
 - **Health Check Path:** `/api/health`
 - **Auto-Deploy:** *After CI checks pass*
-- **Build Filters → Included paths:** `backend/**`, `frontend-starter/**`
+- **Build Filters → Included paths:** `backend/**`, `frontend/**`
 
 **Step 2 setup: GitHub branch protection**
 
-**Settings → Branches → add a rule for `main`:** require a pull request and require the `backend` and
+**Settings → Branches → add a rule for `sharing-platform`:** require a pull request and require the `backend` and
 `frontend` checks to pass. Nobody (human or AI assistant) can then push untested code to production.
 
 **Team workflow**
 1. Work on a branch (`gilles`, the teammate's branch, ...) and push it: CI runs.
-2. Open a pull request to `main`. Merge once CI is green.
-3. Render deploys `main` a few minutes later. Follow it in the service's **Events** and **Logs** tabs.
+2. Open a pull request to `sharing-platform`. Merge once CI is green.
+3. Render deploys `sharing-platform` a few minutes later. Follow it in the service's **Events** and **Logs** tabs.
 4. Something broke? Render → **Events** → *Rollback* to the previous deploy, then fix on a branch.
 
 **Known limitations of the current deployment**
@@ -405,9 +410,6 @@ In the service's **Settings**:
 - **Atlas pause takes the app down:** after 30 days without any connection, Atlas pauses the free
   cluster. `server.js` refuses to start without the database, so Render keeps restarting the service and
   the app is unreachable. Fix: resume the cluster in the Atlas dashboard; Render then starts normally.
-- **Demo account:** `server.js` creates `demo@example.com` / `Demo1234!`, a password published in the
-  README. Anyone can log in with it on the public deployment. Kept for now, for testing (decision, §10);
-  it disappears with the account system in phase 3.2.
 
 Sources: [Render Blueprint reference](https://render.com/docs/blueprint-spec),
 [Render build filters](https://render.com/docs/build-filters),
@@ -447,7 +449,7 @@ code. Each step and phase ends with something that can be demonstrated.
 
 Mostly account setup, plus the **two small backend changes** listed in §7.2 (serve the Angular build,
 require `JWT_SECRET`). They are the only code written in this step, because the app cannot run on Render
-without them. They go through a normal pull request to `main`.
+without them. They go through a normal pull request to `sharing-platform`.
 
 | Service | What to do | Details |
 |---|---|---|
@@ -459,19 +461,19 @@ without them. They go through a normal pull request to `main`.
 
 **Done when:** the current app runs at `https://<service>.onrender.com` (register, log in, upload and play
 a track), and no service has asked for a card. This requires the `app.js` and `server.js` changes listed
-in §7.2 to be on `main`.
+in §7.2 to be on `sharing-platform`.
 
 ### Step 2: continuous deployment
 
-**Content:** the CI workflow (§7.2) on `main`, Render auto-deploy after CI checks pass, build filters, health
-check, branch protection on `main` (§7.2).
+**Content:** the CI workflow (§7.2) on `sharing-platform`, Render auto-deploy after CI checks pass, build filters, health
+check, branch protection on `sharing-platform` (§7.2).
 
-**Done when:** a pull request merged into `main` goes live with no manual action; a pull request with a
+**Done when:** a pull request merged into `sharing-platform` goes live with no manual action; a pull request with a
 failing test cannot be merged and does not deploy; a documentation-only commit does not redeploy.
 
 ### Step 3: project coding
 
-From here on, every phase ships through the step 2 pipeline: merged into `main` means deployed.
+From here on, every phase ships through the step 2 pipeline: merged into `sharing-platform` means deployed.
 
 | Phase | Content | Done when |
 |---|---|---|
@@ -506,7 +508,7 @@ for demos of phases 3.1 to 3.3; if it becomes annoying, do phase 3.4 earlier.
 | Self-hosting | **None for now.** Users do not host anything; everything the project hosts runs on free services (§2). |
 | Free limit reached (B2, Atlas, Render) | **Do nothing, or show an error message.** Never pay (§2). |
 | Copyright | **Nothing for now**, the project is too small (§8). |
-| Demo account (`demo@example.com`) | **Kept for now**, for testing (§7.2), until accounts are removed in phase 3.2. |
+| Demo account (`demo@example.com`) | **Removed** with the account system in phase 3.2. |
 
 **Still open (for later)**
 - Maximum room size. It drives the P2P topology: a full mesh (everyone connected to everyone) is fine
@@ -539,7 +541,7 @@ protection) is still to do, as are phases 3.4 to 3.7.
 | 3.1 `Media` model, storage module (local disk), signed streaming URLs, redacted logs | `backend/src/models/Media.js`, `backend/src/storage/`, `backend/src/routes/mediaRoutes.js`, `backend/src/middleware/httpLogger.js` |
 | 3.2 Rooms, room tokens, host token, expiry, accounts removed | `backend/src/models/Room.js`, `backend/src/routes/roomRoutes.js`, `backend/src/services/roomService.js`, `backend/src/middleware/roomAuth.js` |
 | 3.3 Socket.IO, room state, buffering rules | `backend/src/realtime.js`, `backend/src/sync/` |
-| 3.3 Clock offset, drift correction, synced player, notices | `frontend-starter/src/app/shared/sync/`, `shared/services/sync.service.ts`, `components/sync-player/` |
+| 3.3 Clock offset, drift correction, synced player, notices | `frontend/src/app/shared/sync/`, `shared/services/sync.service.ts`, `components/sync-player/` |
 | HTTP contract, WebSocket protocol | `Documentation/API_CONTRACT.md`, `Documentation/SYNC_PROTOCOL.md` |
 
 Choices made while implementing, to review:

@@ -1,11 +1,11 @@
-  # Préparation MongoDB Atlas - TP1
+# Préparation MongoDB Atlas
 
 Cette partie est réalisée une fois par binôme. Ne copiez jamais l'URI dans Angular, Git, une capture d'écran ou un prompt envoyé à un agent IA.
 
 ## 1. Créer le cluster
 
 1. Créez un compte sur MongoDB Atlas (https://www.mongodb.com/  )
-2. Créez un projet nommé `Guitar Practice Cloud`. Il se peut que vous deviez d'abord créer une organisation puis un projet dans l'organisation.
+2. Créez un projet nommé `Sharing Platform`. Il se peut que vous deviez d'abord créer une organisation puis un projet dans l'organisation.
 3. Déployez un cluster gratuit.
 4. Attendez que son état permette la connexion.
 
@@ -44,7 +44,7 @@ cp .env.example .env
 
 Et remplacez l'URI de connexion par celui que vous avez généré dans l'étape 4, ou dans atlas-credentials.env que vous aurez téléchargé dans l'étape 1. Attention, so vous aviez créé un utilisateur custom dans l'étape 2, il faudra mettre son login et son password. Vous remplacerez bien sur <user> et <password> par les login et password. Attention, NE PAS LAISSER les signes inférieur et supérieur.
 
-IMPORTANT: juste avant le ? dans l'URI, vous ajouterez le nom de la base de données. On prendra par exemple guitar-practice-cloud, l'URI doit donc ressembler à mongodb+srv://<user>:<db_password>@cluster0.l7fl28o.mongodb.net/guitar-practice-cloud?appName=Cluster0
+IMPORTANT: juste avant le ? dans l'URI, vous ajouterez le nom de la base de données. On prendra `sharing-platform` (et `sharing-platform-prod` pour la base de production sur Render), l'URI doit donc ressembler à mongodb+srv://<user>:<db_password>@cluster0.l7fl28o.mongodb.net/sharing-platform?appName=Cluster0
 
 Remplacez les trois marqueurs de l'URI et choisissez une valeur locale longue pour `JWT_SECRET`. Vérifiez avec `git status` que `.env` n'apparaît pas parmi les fichiers à versionner.
 
@@ -57,11 +57,9 @@ npm start
 
 Ouvrez `http://localhost:3000/api/health`. Ca doit afficher {"status":"ok"}, ce qui prouve que le back-end nodeJS répond. Ca ne prouve pas que la connexion à la base de données s'est bien passée et que les données ont bien été créées.
 
-Normalement, le backend crée automatiquement le compte `demo@example.com` / `Demo1234!`. 
+Retournez sur la page web de mongodb.com et cliquez le bouton "browse collections" qui est dans l'affichage du cluster. Ca doit vous mener vers un écran ou sur la gauche vous pouvez ouvrir le contenu de "cluster0", et vous devriez voir dans la liste qui s'affiche en dessous la base sharing-platform. Elle n'apparaît qu'après la première écriture : créez d'abord un salon depuis le frontend. Elle contient alors deux collections, rooms et medias, l'équivalent des tables dans une BD relationnelle.
 
-Retournez sur la page web de mongodb.com et cliquez le bouton "browse collections" qui est dans l'affichage du cluster. Ca doit vous mener vers un écran ou sur la gauche vous pouvez ouvrir le contenu de "cluster0", et vous devriez voir dans la liste qui s'affiche en dessous plusieurs bases de données dont guitar-practice-cloud. Si vous l'ouvre vous verrez à l'intérieur deux collections : tracks et users. Ce sont l'équivalent des tables dans une BD relationnelle. Cliquez sur "users" et vous devriez voir un user qui a été créé par défaut, qui a pour nom "demo". Vous pourrez voir son nom en clair dans le code source du back-end (fichier server.js)
-
-Une fois que tout cela a fonctionné, vous pourrez lancer le front-end angular qui vous est fourni. Retournez dans le fichier `SUJET_ETUDIANT.md`
+Une fois que tout cela a fonctionné, lancez le frontend Angular (voir le [README](../README.md)).
 
 ## Diagnostic rapide
 

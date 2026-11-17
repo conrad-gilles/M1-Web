@@ -7,7 +7,7 @@ import { RoomService } from '../../shared/services/room.service';
 import { RoomSessionService } from '../../shared/services/room-session.service';
 
 /** Le nom d'affichage est mémorisé pour éviter de le ressaisir à chaque salon. */
-const NAME_KEY = 'gpc_display_name';
+const NAME_KEY = 'sharing_platform_name';
 const MAX_NAME_LENGTH = 30; // identique au backend (backend/src/config.js)
 const CODE_PATTERN = /^\s*[A-Za-z0-9]{6}\s*$/;
 
