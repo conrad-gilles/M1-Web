@@ -55,3 +55,22 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with: { name: playwright-traces, path: e2e/test-results, retention-days: 7 }
+
+  # Déploiement sur Render, seulement après un push sur sharing-platform et
+  # seulement si les trois jobs de tests ont réussi. L'URL du Deploy Hook est
+  # secrète : elle est lue dans le secret GitHub RENDER_DEPLOY_HOOK.
+  deploy:
+    needs: [backend, frontend, e2e]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/sharing-platform'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Déclencher le déploiement Render
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK" ]; then
+            echo "::warning::Secret RENDER_DEPLOY_HOOK absent : déploiement ignoré"
+            exit 0
+          fi
+          curl -fsS -X POST "$RENDER_DEPLOY_HOOK" > /dev/null
+          echo "Déploiement Render demandé"
