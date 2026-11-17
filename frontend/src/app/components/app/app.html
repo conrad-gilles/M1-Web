@@ -1,12 +1,12 @@
 <header>
   <div>
-    <b>Sharing Platform</b>
+    <b>Sharing Platform </b>
     <small>Écoutez et regardez ensemble, au même instant</small>
   </div>
   <nav aria-label="Navigation principale">
     <a routerLink="/">Accueil</a>
     @if (session(); as current) {
-      <a [routerLink]="['/rooms', current.code]">Salon {{ current.code }}</a>
+    <a [routerLink]="['/rooms', current.code]">Salon {{ current.code }}</a>
     }
   </nav>
 </header>
