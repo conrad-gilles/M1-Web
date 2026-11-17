@@ -86,9 +86,10 @@ Toutes les erreurs ont la forme `{ "message": "…" }`.
 
 | Statut | Cas |
 |---|---|
-| `400` | `Nom d'affichage requis (30 caractères maximum)`, `Fichier requis`, `Format de média non accepté`, `Fichier trop volumineux (25 Mo maximum)` |
+| `400` | `Corps JSON invalide`, `Nom d'affichage requis (30 caractères maximum)`, `Fichier requis`, `Format de média non accepté`, `Fichier trop volumineux (25 Mo maximum)` |
 | `401` | `Jeton de salon requis` (en-tête absent), `Salon fermé ou jeton invalide` (jeton falsifié ou expiré, salon fermé ou expiré, participant sorti), `Lien de lecture invalide ou expiré` (route `/stream`) |
 | `403` | `Action réservée à l'hôte du salon` (`X-Host-Token` absent ou faux) |
 | `404` | `Salon inconnu` (mauvais code à l'entrée), `Média inconnu` (inexistant, appartenant à un autre salon, ou identifiant invalide), `Ressource inconnue` (route `/api` inexistante) |
 | `409` | `Salon complet`, `Salon plein : 20 médias maximum` |
 | `429` | `Trop de tentatives, réessayez plus tard` (codes erronés), `Trop de salons créés, réessayez plus tard` |
+| `500` | `Erreur interne du serveur` (erreur inattendue, détail dans les logs uniquement), `Métadonnée supprimée, mais fichier non supprimé` (`DELETE /media/:id`) |

@@ -47,7 +47,6 @@ export function createApp({
 
   /** Endpoint public utilisé pour vérifier que l'API répond. */
   app.get("/api/health", (_req, res) => {
-    console.log("[health] Vérification de l'API");
     res.json({ status: "ok" });
   });
 
@@ -68,6 +67,9 @@ export function createApp({
   if (fs.existsSync(indexFile)) {
     console.log(`[startup] Build Angular servi depuis ${frontendDir}`);
     app.use(express.static(frontendDir));
+    // Certains navigateurs demandent /favicon.ico même quand la page déclare
+    // une icône SVG : on les renvoie vers celle-ci.
+    app.get("/favicon.ico", (_req, res) => res.redirect(301, "/favicon.svg"));
     // Toute autre requête GET reçoit index.html : c'est le routeur Angular qui
     // interprète ensuite l'URL.
     app.get(/.*/, (req, res, next) => {
@@ -105,8 +107,16 @@ export function createApp({
     if (error?.name === "CastError") {
       return res.status(404).json({ message: "Ressource inconnue" });
     }
+    // Corps JSON illisible envoyé par le client.
+    if (error?.type === "entity.parse.failed") {
+      return res.status(400).json({ message: "Corps JSON invalide" });
+    }
 
-    next(error);
+    // Erreur inattendue (base indisponible, bug...) : détail dans les logs
+    // uniquement. Le gestionnaire par défaut d'Express renverrait une page
+    // HTML contenant la pile d'appels.
+    if (res.headersSent) return next(error);
+    res.status(500).json({ message: "Erreur interne du serveur" });
   });
 
   return app;

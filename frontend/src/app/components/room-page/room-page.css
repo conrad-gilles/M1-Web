@@ -19,8 +19,17 @@
 }
 
 .actions .danger {
+  color: white;
   background: #b3261e;
   border-color: #b3261e;
+}
+
+/* Téléphones : boutons d'action en grille de deux colonnes. */
+@media (max-width: 480px) {
+  .actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 .card {

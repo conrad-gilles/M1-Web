@@ -314,6 +314,10 @@ test("le build Angular est servi, sans masquer les routes /api", async () => {
     const deep = await fetch(url + "/rooms/K7P2QX");
     assert.equal(deep.status, 200);
     assert.equal(await deep.text(), "<html>angular</html>");
+    // /favicon.ico renvoie vers l'icône SVG du build.
+    const favicon = await fetch(url + "/favicon.ico", { redirect: "manual" });
+    assert.equal(favicon.status, 301);
+    assert.equal(favicon.headers.get("location"), "/favicon.svg");
     // Un fichier absent n'est pas remplacé par la page HTML.
     assert.equal((await fetch(url + "/rooms/main-absent.js")).status, 404);
     // L'API garde la priorité, y compris pour une route inconnue.

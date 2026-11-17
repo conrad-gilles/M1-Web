@@ -117,13 +117,19 @@ progress {
 }
 
 .media-actions button {
-  min-width: 2.25rem;
-  min-height: 2.25rem;
+  min-width: 2.75rem;
 }
 
-.media-actions .danger {
-  border-color: #b3261e;
-  color: #b3261e;
+/* Téléphones : les boutons passent sous le titre au lieu de l'écraser. */
+@media (max-width: 480px) {
+  .media-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .media-actions {
+    justify-content: flex-end;
+  }
 }
 
 .pager {
@@ -132,4 +138,19 @@ progress {
   justify-content: center;
   gap: 1rem;
   margin: 0.75rem 0;
+}
+
+.pager span {
+  white-space: nowrap;
+}
+
+/* Téléphones : pagination sur une seule ligne. */
+@media (max-width: 480px) {
+  .pager {
+    gap: 0.5rem;
+  }
+
+  .pager button {
+    padding: 0.7rem 0.75rem;
+  }
 }
