@@ -15,6 +15,16 @@
                             {
                                 "glob": "**/*",
                                 "input": "public"
+                            },
+                            {
+                                "glob": "ffmpeg-core.{js,wasm}",
+                                "input": "node_modules/@ffmpeg/core/dist/esm",
+                                "output": "ffmpeg"
+                            },
+                            {
+                                "glob": "{worker,const,errors}.js",
+                                "input": "node_modules/@ffmpeg/ffmpeg/dist/esm",
+                                "output": "ffmpeg"
                             }
                         ],
                         "styles": [

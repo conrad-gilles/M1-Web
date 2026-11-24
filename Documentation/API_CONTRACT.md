@@ -51,7 +51,14 @@ qu'à son propre salon et à ses médias.
   à ce média (6 h par défaut, variable `MEDIA_URL_TTL_SECONDS`), à placer
   directement dans `<audio src>` ou `<video src>`. `media` est le `Media`
   correspondant.
-- Formats acceptés à l'upload : MP3, WAV, OGG et M4A, 25 Mo maximum.
+- Formats acceptés à l'upload, 25 Mo maximum :
+  - audio (`kind: "audio"`) : MP3, WAV, OGG et M4A ;
+  - vidéo (`kind: "video"`) : MP4 (`video/mp4`), WebM (`video/webm`) et OGV
+    (`video/ogg`).
+  `kind` est déduit du type MIME par le serveur ; le client s'en sert pour
+  afficher un lecteur `<audio>` ou `<video>`. Les vidéos MOV, AVI et MKV ne
+  sont pas acceptées par l'API : le frontend les convertit d'abord en MP4 dans
+  le navigateur (FFmpeg WebAssembly) et envoie le résultat, nommé `*.mp4`.
 
 ## Règles des salons
 

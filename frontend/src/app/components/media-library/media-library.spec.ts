@@ -4,6 +4,7 @@ import { HttpTestingController, TestRequest, provideHttpClientTesting } from '@a
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { Page } from '../../shared/models/page.model';
 import { Media } from '../../shared/models/media.model';
+import { VideoConverterService } from '../../shared/services/video-converter.service';
 import { MediaLibraryComponent } from './media-library';
 
 const track = (id: string, title = `Morceau ${id}`): Media => ({
@@ -29,6 +30,7 @@ describe('MediaLibraryComponent', () => {
   let component: MediaLibraryComponent;
   let http: HttpTestingController;
   let snackBar: { open: ReturnType<typeof vi.fn> };
+  let converter: { toMp4: ReturnType<typeof vi.fn> };
   let confirmSpy: ReturnType<typeof vi.spyOn>;
 
   /** Requête GET de liste (l'upload POST partage la même URL). */
@@ -54,12 +56,15 @@ describe('MediaLibraryComponent', () => {
   beforeEach(() => {
     localStorage.clear();
     snackBar = { open: vi.fn() };
+    converter = { toMp4: vi.fn() };
     confirmSpy = vi.spyOn(globalThis, 'confirm').mockReturnValue(true);
     TestBed.configureTestingModule({
       providers: [
         provideHttpClient(),
         provideHttpClientTesting(),
         { provide: MatSnackBar, useValue: snackBar },
+        // Le vrai convertisseur charge FFmpeg (WebAssembly) : testé de bout en bout.
+        { provide: VideoConverterService, useValue: converter },
       ],
     });
     http = TestBed.inject(HttpTestingController);
@@ -310,6 +315,97 @@ describe('MediaLibraryComponent', () => {
       expectList(1).flush(page([track('new')]));
     });
 
+    describe('vidéo MOV/AVI/MKV convertie avant l’envoi', () => {
+      const mkv = () => new File(['matroska'], 'Vacances.mkv', { type: 'video/x-matroska' });
+      const mp4 = (size = 3) => {
+        const file = new File(['mp4'], 'Vacances.mp4', { type: 'video/mp4' });
+        Object.defineProperty(file, 'size', { value: size });
+        return file;
+      };
+      /** Laisse se terminer la promesse de conversion. */
+      const settle = () => new Promise((resolve) => setTimeout(resolve));
+
+      it('n’appelle pas le convertisseur pour un fichier déjà lisible', () => {
+        create();
+        component.file = audioFile();
+
+        component.upload();
+
+        expect(converter.toMp4).not.toHaveBeenCalled();
+        postRequest().flush(track('new'));
+        expectList(1).flush(page([track('new')]));
+      });
+
+      it('convertit, affiche la progression, puis envoie le MP4', async () => {
+        create();
+        let reportProgress!: (percent: number) => void;
+        let finish!: (file: File) => void;
+        converter.toMp4.mockImplementation((_file: File, onProgress: (percent: number) => void) => {
+          reportProgress = onProgress;
+          return new Promise<File>((resolve) => (finish = resolve));
+        });
+        component.file = mkv();
+
+        component.upload();
+        fixture.detectChanges();
+        const root = fixture.nativeElement as HTMLElement;
+        expect(component.uploadState()).toEqual({ status: 'converting', percent: null });
+        expect(root.textContent).toContain('chargement du convertisseur');
+        expect(root.querySelector<HTMLInputElement>('input[type="file"]')?.disabled).toBe(true);
+
+        reportProgress(40);
+        fixture.detectChanges();
+        expect(component.uploadState()).toEqual({ status: 'converting', percent: 40 });
+        expect(root.querySelector('progress')?.getAttribute('value')).toBe('40');
+
+        component.upload(); // ignoré pendant la conversion
+        expect(converter.toMp4).toHaveBeenCalledTimes(1);
+
+        finish(mp4());
+        await settle();
+        const request = postRequest();
+        const sent = (request.request.body as FormData).get('file') as File;
+        expect(sent.name).toBe('Vacances.mp4');
+        expect(sent.type).toBe('video/mp4');
+        // Le titre par défaut reste le nom choisi par l'utilisateur.
+        expect((request.request.body as FormData).get('title')).toBe('Vacances.mkv');
+        request.flush(track('new'));
+        expectList(1).flush(page([track('new')]));
+        expect(component.uploadState()).toEqual({ status: 'success', title: 'Morceau new' });
+      });
+
+      it('échec de conversion : message clair, rien n’est envoyé, nouvel essai possible', async () => {
+        create();
+        converter.toMp4.mockRejectedValue(new Error('FFmpeg a échoué (code 1)'));
+        component.file = mkv();
+
+        component.upload();
+        await settle();
+        fixture.detectChanges();
+
+        expect(component.uploadState()).toEqual({
+          status: 'error',
+          message: 'Conversion impossible : ce fichier vidéo est illisible ou utilise un format non pris en charge.',
+        });
+        expect(component.title.enabled).toBe(true);
+        expect(component.busy()).toBe(false);
+      });
+
+      it('refuse un résultat de plus de 25 Mo sans l’envoyer', async () => {
+        create();
+        converter.toMp4.mockResolvedValue(mp4(30 * 1024 * 1024));
+        component.file = mkv();
+
+        component.upload();
+        await settle();
+
+        expect(component.uploadState()).toEqual({
+          status: 'error',
+          message: 'Vidéo convertie trop volumineuse (30.0 Mo). Taille maximale : 25 Mo.',
+        });
+      });
+    });
+
     it("n'envoie rien sans fichier choisi", () => {
       create();
 
@@ -392,6 +488,72 @@ describe('MediaLibraryComponent', () => {
 
       expect(component.fileError()).toBe('');
       expect(component.file?.name).toBe('piste.m4a');
+    });
+
+    it('accepte une vidéo MP4', () => {
+      create();
+      const input = { files: [new File(['x'], 'clip.mp4', { type: 'video/mp4' })], value: 'clip.mp4' };
+
+      component.choose({ target: input } as unknown as Event);
+
+      expect(component.fileError()).toBe('');
+      expect(component.file?.name).toBe('clip.mp4');
+    });
+
+    it('accepte une vidéo MOV/AVI/MKV de plus de 25 Mo : elle sera convertie', () => {
+      create();
+      const avi = new File(['x'], 'film.avi', { type: 'video/x-msvideo' });
+      Object.defineProperty(avi, 'size', { value: 80 * 1024 * 1024 });
+
+      component.choose({ target: { files: [avi], value: 'film.avi' } } as unknown as Event);
+
+      expect(component.fileError()).toBe('');
+      expect(component.file?.name).toBe('film.avi');
+    });
+
+    it('avertit sans bloquer pour une vidéo à convertir de plus de 200 Mo', () => {
+      create();
+      const mov = new File(['x'], 'film.mov', { type: 'video/quicktime' });
+      Object.defineProperty(mov, 'size', { value: 250 * 1024 * 1024 });
+
+      component.choose({ target: { files: [mov], value: 'film.mov' } } as unknown as Event);
+      fixture.detectChanges();
+
+      const root = fixture.nativeElement as HTMLElement;
+      expect(component.fileError()).toBe('');
+      expect(component.file?.name).toBe('film.mov');
+      expect(root.querySelector('.message.warning')?.textContent).toContain(
+        'Fichier volumineux (250.0 Mo, 200 Mo recommandés au plus)',
+      );
+      // L'envoi reste possible.
+      expect(root.querySelector<HTMLButtonElement>('.card button')?.disabled).toBe(false);
+
+      // Un autre choix efface l'avertissement.
+      const small = new File(['x'], 'clip.mkv', { type: 'video/x-matroska' });
+      component.choose({ target: { files: [small], value: 'clip.mkv' } } as unknown as Event);
+      fixture.detectChanges();
+      expect(component.fileWarning()).toBe('');
+      expect(root.querySelector('.message.warning')).toBeNull();
+    });
+
+    it("n'avertit pas pour un gros fichier qui n'a pas besoin de conversion", () => {
+      create();
+      const mp4 = new File(['x'], 'clip.mp4', { type: 'video/mp4' });
+      Object.defineProperty(mp4, 'size', { value: 20 * 1024 * 1024 });
+
+      component.choose({ target: { files: [mp4], value: 'clip.mp4' } } as unknown as Event);
+
+      expect(component.fileWarning()).toBe('');
+    });
+
+    it('refuse une vidéo dans un format inconnu', () => {
+      create();
+      const input = { files: [new File(['x'], 'film.wmv', { type: 'video/x-ms-wmv' })], value: 'film.wmv' };
+
+      component.choose({ target: input } as unknown as Event);
+
+      expect(component.file).toBeUndefined();
+      expect(component.fileError()).toContain('Format non supporté');
     });
 
     it('formate tailles, dates et types pour l’affichage', () => {

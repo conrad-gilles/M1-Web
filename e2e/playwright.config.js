@@ -23,6 +23,8 @@ export default defineConfig({
   reporter: process.env.CI ? [["github"], ["list"]] : "list",
   use: {
     ...devices["Desktop Chrome"],
+    // Les tests lisent des médias : aucun son ne doit sortir de la machine.
+    launchOptions: { args: ["--mute-audio"] },
     baseURL: `http://127.0.0.1:${PORT}`,
     trace: "retain-on-failure",
   },

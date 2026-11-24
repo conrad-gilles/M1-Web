@@ -88,15 +88,19 @@ test("base indisponible : 500 JSON sur les routes des médias", async () => {
 
 test("upload : échec du stockage → 500 et aucun fichier temporaire laissé", async () => {
   const { token } = await t.createRoom();
-  mock.method(t.storage, "save", async () => {
+  let tempPath;
+  mock.method(t.storage, "save", async (file) => {
+    tempPath = file.tempPath;
     throw new Error("disque plein");
   });
 
   await assertInternalError(await t.upload(token, { file: mp3() }), "stockage");
 
-  const tmp = path.resolve(import.meta.dirname, "../data/tmp");
-  const leftovers = fs.existsSync(tmp) ? fs.readdirSync(tmp) : [];
-  assert.deepEqual(leftovers, []);
+  // On vérifie le fichier temporaire de CET upload, pas tout le dossier
+  // data/tmp : les autres fichiers de test, lancés en parallèle par
+  // `node --test`, y écrivent aussi leurs uploads en cours.
+  assert.ok(tempPath, "le stockage a bien été appelé");
+  assert.equal(fs.existsSync(tempPath), false);
   assert.equal(t.db.all(Media).length, 0);
 });
 

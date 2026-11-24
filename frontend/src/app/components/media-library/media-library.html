@@ -5,12 +5,12 @@
 
       <label>Titre<input [formControl]="title" /></label>
       <label>
-        Fichier audio
+        Fichier audio ou vidéo
         <input
           #fileInput
           type="file"
-          accept="audio/*"
-          [disabled]="uploading()"
+          accept="audio/*,video/*,.mov,.avi,.mkv"
+          [disabled]="busy()"
           (change)="choose($event)"
           [attr.aria-describedby]="fileError() ? 'file-error' : null"
         />
@@ -19,13 +19,23 @@
       @if (fileError()) {
         <p id="file-error" class="message error" role="alert">{{ fileError() }}</p>
       }
+      @if (fileWarning() && !busy()) {
+        <p class="message warning" role="status">{{ fileWarning() }}</p>
+      }
 
-      <button type="button" (click)="upload()" [disabled]="!file || uploading()">
-        {{ uploading() ? 'Envoi en cours…' : 'Envoyer' }}
+      <button type="button" (click)="upload()" [disabled]="!file || busy()">
+        {{ converting() ? 'Conversion en cours…' : uploading() ? 'Envoi en cours…' : 'Envoyer' }}
       </button>
 
-      @if (uploading()) {
-        <p class="message loading" role="status">Envoi du fichier, veuillez patienter…</p>
+      @if (busy()) {
+        <p class="message loading" role="status">
+          @if (converting()) {
+            Conversion de la vidéo en MP4 sur votre appareil…
+            {{ uploadPercent() === null ? '(chargement du convertisseur, environ 30 Mo la première fois)' : '' }}
+          } @else {
+            Envoi du fichier, veuillez patienter…
+          }
+        </p>
         <!-- Sans attribut value, <progress> est indéterminée (taille totale inconnue). -->
         <progress
           [attr.value]="uploadPercent()"

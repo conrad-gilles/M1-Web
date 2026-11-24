@@ -1,0 +1,32 @@
+#!/bin/sh
+# Hook git « pre-push » : lance les tests avant chaque `git push` et annule le
+# push si l'un d'eux échoue. Activation, une fois par clone :
+#   git config core.hooksPath .githooks
+# Les tests de bout en bout (navigateurs + MongoDB, ~1 min) restent dans la CI
+# GitHub (.github/workflows/ci.yml). Contourner exceptionnellement :
+#   git push --no-verify
+
+root="$(git rev-parse --show-toplevel)" || exit 1
+
+run() {
+  dir="$1"
+  shift
+  if [ ! -d "$root/$dir/node_modules" ]; then
+    echo "pre-push : dépendances absentes dans $dir/ (lancer « npm install » dans $dir/)." >&2
+    exit 1
+  fi
+  echo "pre-push : $dir -> $*"
+  if ! (cd "$root/$dir" && "$@" > "$root/.githooks/last-$dir.log" 2>&1); then
+    echo "" >&2
+    echo "pre-push : ÉCHEC de « $* » dans $dir/. Push annulé." >&2
+    echo "Fin du journal (complet dans .githooks/last-$dir.log) :" >&2
+    tail -n 30 "$root/.githooks/last-$dir.log" >&2
+    exit 1
+  fi
+}
+
+run backend npm test
+run frontend npm test
+run frontend npm run build
+
+echo "pre-push : tous les tests passent, push autorisé."

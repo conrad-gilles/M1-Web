@@ -157,9 +157,10 @@ Rules:
 
 ## 6. Media formats and file identity
 
-- **Formats (v1): only what browsers play natively.** Audio: MP3, AAC/M4A, OGG, WAV. Video: MP4
-  (H.264 + AAC) and WebM (VP9/AV1 + Opus). MKV, AVI or HEVC often do not play: reject them at upload with
-  a clear message instead of trying to transcode.
+- **Formats: the server stores only what browsers play natively.** Audio: MP3, AAC/M4A, OGG, WAV.
+  Video: MP4 (H.264 + AAC), WebM (VP9/AV1 + Opus) and OGV. **MOV, AVI and MKV are converted to MP4 in
+  the uploader's browser** before the upload (done early, November 2026, see the conversion bullet
+  below and §11.1); the server never receives them. Other formats are rejected with a clear message.
 - **Check the real file type** from its first bytes (magic number). Today the backend trusts
   `file.mimetype`, which is the `Content-Type` declared by the browser.
 - **Large uploads.** Video files weigh hundreds of MB to several GB. One multipart request through Node
@@ -176,8 +177,9 @@ Rules:
     offset slider. Hashing a multi-GB file in the browser needs incremental hashing (for example
     `hash-wasm`) or a fast fingerprint (size + hash of the first and last few MB), because
     `crypto.subtle.digest` needs the whole file in memory.
-- **Future: more advanced formats** (MKV, AVI, MOV, HEVC/H.265, FLAC, ...), without paying for a server:
-  convert in the user's own browser with `ffmpeg.wasm` (FFmpeg compiled to WebAssembly).
+- **More advanced formats** (MKV, AVI, MOV, HEVC/H.265, FLAC, ...), without paying for a server:
+  convert in the user's own browser with `ffmpeg.wasm` (FFmpeg compiled to WebAssembly). MOV, AVI and
+  MKV are done (§11.1); HEVC detection and FLAC are not.
   - *Remuxing* (changing only the container, for example MKV with H.264 inside → MP4) is fast.
   - *Transcoding* (changing the codec, for example HEVC → H.264) is slow, especially for full films, and
     runs on the user's CPU.
@@ -504,7 +506,8 @@ for demos of phases 3.1 to 3.3; if it becomes annoying, do phase 3.4 earlier.
 | Accounts | **None, in both versions.** The host shares a simple room code; others join with it and a display name (§4). |
 | Seeking | **When one person seeks, everyone follows**, with a notice showing who did it (§5 rule 7). |
 | P2P architecture | **Completely serverless** in the future: no server run by the project (§4). |
-| Formats | Browser-native formats now; **more advanced formats in the future**, converted in the browser (§6). |
+| Formats | Browser-native formats on the server; **MOV, AVI and MKV converted to MP4 in the uploader's browser** with `ffmpeg.wasm`, not on the server, to stay on Render's free tier (§6). |
+| Size limits | **The server keeps a hard limit** (25 MB per file today) because it protects the shared free storage. **Limits that only protect the user's own device are recommendations:** a MOV/AVI/MKV over 200 MB shows a warning but can still be converted. |
 | Self-hosting | **None for now.** Users do not host anything; everything the project hosts runs on free services (§2). |
 | Free limit reached (B2, Atlas, Render) | **Do nothing, or show an error message.** Never pay (§2). |
 | Copyright | **Nothing for now**, the project is too small (§8). |
@@ -543,6 +546,9 @@ protection) is still to do, as are phases 3.4 to 3.7.
 | 3.3 Socket.IO, room state, buffering rules | `backend/src/realtime.js`, `backend/src/sync/` |
 | 3.3 Clock offset, drift correction, synced player, notices | `frontend/src/app/shared/sync/`, `shared/services/sync.service.ts`, `components/sync-player/` |
 | HTTP contract, WebSocket protocol | `Documentation/API_CONTRACT.md`, `Documentation/SYNC_PROTOCOL.md` |
+| 3.5 (part) Video types: MP4, WebM, OGV accepted, `kind: "video"`, `<video>` player with full screen | `backend/src/config.js`, `components/media-library/`, `components/sync-player/` |
+| 3.7 (early) MOV/AVI/MKV converted to MP4 in the browser (`ffmpeg.wasm`, loaded only when needed) | `frontend/src/app/shared/video/`, `shared/services/video-converter.service.ts`, `frontend/angular.json` (assets) |
+| End-to-end video tests and their clips | `e2e/tests/video.spec.js`, `e2e/fixtures/` |
 
 Choices made while implementing, to review:
 
@@ -562,8 +568,19 @@ Choices made while implementing, to review:
 - **Loading a media leaves it paused at 0 s**; anyone then presses play.
 - **During a buffering wait:** pause cancels the automatic resume, play resumes at once, seek keeps
   waiting (§5 rule 5 did not say).
-- **Upload formats are still audio only, 25 MB.** The player already uses `<video>` for video media;
-  video types and large uploads are phase 3.5.
+- **Video is accepted, still with the 25 MB limit** (a few minutes of video). Still missing from phase
+  3.5: direct upload to B2 with presigned URLs for large files, a higher video limit, and the
+  magic-byte check.
+- **In-browser conversion (MOV/AVI/MKV):**
+  - Tracks that browsers already play (H.264 video, AAC or MP3 audio) are copied into an MP4 in about a
+    second. Anything else is re-encoded to H.264/AAC (`ultrafast` preset), which is slower, especially
+    on phones. Only the first video and audio tracks are kept (MKV subtitles are dropped).
+  - The ~32 MB converter is served from our own site (`/ffmpeg/`) and downloaded only when someone
+    uploads one of these formats; other users never load it. The single-threaded build is used so no
+    COOP/COEP headers are needed.
+  - Above 200 MB, a warning explains that the conversion may be very slow or run out of memory, but the
+    upload is not blocked (§10). The converted file must still fit the server's 25 MB limit.
+  - The converted file is uploaded as `name.mp4`, so the library shows `.mp4` as the original name.
 - **Existing data:** tracks and users created before these phases stay in their old MongoDB
   collections and are no longer read.
 

@@ -53,6 +53,11 @@ button:disabled {
   color: #611a15;
 }
 
+.message.warning {
+  background: #fff4e5;
+  color: #663c00;
+}
+
 .message.success {
   background: #e6f4ea;
   color: #1e4620;

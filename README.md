@@ -1,8 +1,8 @@
 # Sharing Platform
 
-Une « watch party » : un participant ajoute un fichier audio (la vidéo arrive
-en phase 3.5), partage le **code du salon**, et tout le monde lit le même média
-au même instant. Lecture, pause et déplacement sont synchronisés, sans compte :
+Une « watch party » : un participant ajoute un fichier audio ou vidéo,
+partage le **code du salon**, et tout le monde lit le même média au même
+instant. Lecture, pause et déplacement sont synchronisés, sans compte :
 un nom d'affichage suffit.
 
 Projet du cours Technologies Web (M1 Informatique), construit à partir de
@@ -57,7 +57,20 @@ vaut pour tout le navigateur : plusieurs onglets ouverts sur le salon sont le
 même participant. Pour tester seul avec plusieurs participants, ouvrir une
 fenêtre de navigation privée ou un autre navigateur.
 
-Les fichiers de `frontend/fichiers-audio-de-test/` servent pour les essais.
+Les fichiers de `frontend/fichiers-audio-de-test/` servent pour les essais, et
+les courtes vidéos de `e2e/fixtures/` (MP4, MKV, AVI, son silencieux) pour la vidéo.
+
+### Formats acceptés
+
+| Type | Formats | Limite |
+|---|---|---|
+| Audio | MP3, WAV, OGG, M4A | 25 Mo |
+| Vidéo | MP4, WebM, OGV | 25 Mo |
+| Vidéo convertie | MOV, AVI, MKV | 25 Mo après conversion ; avertissement au-delà de 200 Mo avant conversion |
+
+Les MOV, AVI et MKV sont convertis en MP4 **dans le navigateur** de la personne
+qui les envoie (`ffmpeg.wasm`), puis envoyés comme un MP4. Le convertisseur
+(~32 Mo) n'est téléchargé que la première fois qu'il sert.
 
 ## Tests
 
@@ -74,10 +87,25 @@ base MongoDB locale éphémère, build Angular) et la pilotent avec Chromium :
 création et entrée dans un salon, lecture synchronisée entre deux personnes
 (écart inférieur à 0,5 s), rattrapage d'un retard ou d'une avance, arrivant
 tardif, onglets d'un même navigateur, actions de l'hôte, affichage sur
-téléphone.
+téléphone, vidéo (lecteur `<video>` synchronisé, conversion des MKV et AVI dans
+le navigateur). Le son des navigateurs de test est coupé.
 
 La CI GitHub Actions ([ci.yml](.github/workflows/ci.yml)) lance les trois
 suites et le build Angular à chaque push.
+
+### Bloquer un push qui casse les tests
+
+GitHub ne peut pas refuser un push : la CI tourne après. Le hook
+[.githooks/pre-push](.githooks/pre-push) lance donc, avant chaque `git push`,
+les tests du backend, ceux du frontend et le build Angular (~25 s), et annule le
+push si l'un échoue. Les tests de bout en bout restent dans la CI. À activer une
+fois par clone :
+
+```bash
+git config core.hooksPath .githooks
+```
+
+En cas d'urgence, `git push --no-verify` passe outre.
 
 ## Documentation
 

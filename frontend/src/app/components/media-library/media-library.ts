@@ -5,9 +5,15 @@ import { MatSnackBar } from '@angular/material/snack-bar';
 import { Media } from '../../shared/models/media.model';
 import { UploadState } from '../../shared/models/upload-state.model';
 import { MediaService } from '../../shared/services/media.service';
+import { VideoConverterService } from '../../shared/services/video-converter.service';
+import {
+  RECOMMENDED_CONVERSION_INPUT_SIZE,
+  fileExtension,
+  needsConversion,
+} from '../../shared/video/video-conversion';
 
 /**
- * Formats audios acceptés par le backend (voir backend/src/config.js, la variable
+ * Formats audio et vidéo acceptés par le backend (voir backend/src/config.js, la variable
  * `ALLOWED_MIME_TYPES`). Dupliquer cette liste côté frontend permet d'afficher une erreur
  * immédiate, mais ne remplace jamais la vérification faite par le serveur :
  * un client malveillant peut toujours envoyer une requête directement à l'API
@@ -20,11 +26,14 @@ const ACCEPTED_MIME_TYPES = new Set([
   'audio/ogg',
   'audio/mp4',
   'audio/x-m4a',
+  'video/mp4',
+  'video/webm',
+  'video/ogg',
 ]);
 
 /** Certains navigateurs ne renseignent pas `file.type` pour le m4a/wav : on
  * retombe alors sur l'extension du nom de fichier. */
-const ACCEPTED_EXTENSIONS = new Set(['.mp3', '.wav', '.ogg', '.m4a']);
+const ACCEPTED_EXTENSIONS = new Set(['.mp3', '.wav', '.ogg', '.m4a', '.mp4', '.webm', '.ogv']);
 
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25 Mo, identique au backend.
 
@@ -41,6 +50,7 @@ const SNACKBAR_DURATION = 5000;
 export class MediaLibraryComponent {
   private readonly service = inject(MediaService);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly converter = inject(VideoConverterService);
 
   /** Média actuellement chargé dans le lecteur du salon, pour le mettre en évidence. */
   readonly activeMediaId = input<string | null>(null);
@@ -72,15 +82,20 @@ export class MediaLibraryComponent {
   // --- Formulaire d'upload ---------------------------------------------------
   readonly title = new FormControl('', { nonNullable: true });
   readonly fileError = signal('');
+  /** Avertissement non bloquant sur le fichier choisi (l'envoi reste possible). */
+  readonly fileWarning = signal('');
   readonly uploadState = signal<UploadState>({ status: 'idle' });
   file?: File;
   private readonly fileInput = viewChild<ElementRef<HTMLInputElement>>('fileInput');
 
   // Valeurs dérivées de `uploadState` pour garder le template simple.
+  readonly converting = computed(() => this.uploadState().status === 'converting');
   readonly uploading = computed(() => this.uploadState().status === 'uploading');
+  /** Conversion ou envoi en cours : le formulaire est verrouillé. */
+  readonly busy = computed(() => this.converting() || this.uploading());
   readonly uploadPercent = computed(() => {
     const state = this.uploadState();
-    return state.status === 'uploading' ? state.percent : null;
+    return state.status === 'uploading' || state.status === 'converting' ? state.percent : null;
   });
   readonly uploadError = computed(() => {
     const state = this.uploadState();
@@ -102,6 +117,7 @@ export class MediaLibraryComponent {
     const input = event.target as HTMLInputElement;
     const selected = input.files?.[0];
     this.uploadState.set({ status: 'idle' });
+    this.fileWarning.set('');
 
     if (!selected) {
       this.file = undefined;
@@ -120,6 +136,7 @@ export class MediaLibraryComponent {
 
     this.file = selected;
     this.fileError.set('');
+    this.fileWarning.set(this.warnAbout(selected));
     console.debug('[MediaLibrary] Fichier sélectionné', this.file.name);
   }
 
@@ -130,17 +147,31 @@ export class MediaLibraryComponent {
    * backend/src/middleware/upload.js) car le frontend peut être contourné.
    */
   private validateFile(file: File): string | null {
-    const extension = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
+    // MOV/AVI/MKV : converti en MP4 avant l'envoi. La limite de 25 Mo
+    // s'applique au résultat, vérifié après la conversion ; la taille du
+    // fichier source ne donne lieu qu'à un avertissement (voir warnAbout).
+    if (needsConversion(file)) return null;
+
     const typeKnown = ACCEPTED_MIME_TYPES.has(file.type);
-    const extensionKnown = ACCEPTED_EXTENSIONS.has(extension);
+    const extensionKnown = ACCEPTED_EXTENSIONS.has(fileExtension(file.name));
 
     if (!typeKnown && !extensionKnown) {
-      return 'Format non supporté. Formats acceptés : MP3, WAV, OGG, M4A.';
+      return 'Format non supporté. Formats acceptés : MP3, WAV, OGG, M4A (audio), MP4, WebM, OGV, MOV, AVI, MKV (vidéo).';
     }
     if (file.size > MAX_FILE_SIZE) {
       return `Fichier trop volumineux (${this.formatSize(file.size)}). Taille maximale : 25 Mo.`;
     }
     return null;
+  }
+
+  /** Recommandation, pas une interdiction : l'utilisateur décide d'essayer. */
+  private warnAbout(file: File): string {
+    if (!needsConversion(file) || file.size <= RECOMMENDED_CONVERSION_INPUT_SIZE) return '';
+    return (
+      `Fichier volumineux (${this.formatSize(file.size)}, 200 Mo recommandés au plus). ` +
+      'La conversion se fait sur votre appareil : elle peut être très lente, voire échouer ' +
+      'par manque de mémoire, surtout sur téléphone. Le résultat doit aussi faire 25 Mo au plus.'
+    );
   }
 
   // --- Bibliothèque paginée ------------------------------------------------
@@ -194,13 +225,54 @@ export class MediaLibraryComponent {
    */
   upload(): void {
     // Empêche les doubles soumissions si l'utilisateur reclique pendant l'envoi.
-    if (!this.file || this.uploading()) return;
+    if (!this.file || this.busy()) return;
 
     const file = this.file;
     const title = this.title.value || file.name;
-
-    this.uploadState.set({ status: 'uploading', percent: 0 });
     this.title.disable();
+
+    if (needsConversion(file)) {
+      void this.convertThenSend(file, title);
+    } else {
+      this.send(file, title);
+    }
+  }
+
+  /**
+   * MOV/AVI/MKV : conversion en MP4 dans le navigateur (FFmpeg WebAssembly,
+   * chargé seulement maintenant), puis envoi normal du fichier converti.
+   */
+  private async convertThenSend(file: File, title: string): Promise<void> {
+    this.uploadState.set({ status: 'converting', percent: null });
+    let converted: File;
+    try {
+      converted = await this.converter.toMp4(file, (percent) =>
+        this.uploadState.set({ status: 'converting', percent }),
+      );
+    } catch (error) {
+      console.error('[MediaLibrary] Conversion impossible', error);
+      this.title.enable();
+      this.uploadState.set({
+        status: 'error',
+        message: 'Conversion impossible : ce fichier vidéo est illisible ou utilise un format non pris en charge.',
+      });
+      return;
+    }
+
+    console.debug('[MediaLibrary] Vidéo convertie', file.size, '->', converted.size);
+    if (converted.size > MAX_FILE_SIZE) {
+      this.title.enable();
+      this.uploadState.set({
+        status: 'error',
+        message: `Vidéo convertie trop volumineuse (${this.formatSize(converted.size)}). Taille maximale : 25 Mo.`,
+      });
+      return;
+    }
+    this.send(converted, title);
+  }
+
+  private send(file: File, title: string): void {
+    this.uploadState.set({ status: 'uploading', percent: 0 });
 
     this.service.upload(file, title).subscribe({
       next: (event) => {
@@ -216,6 +288,7 @@ export class MediaLibraryComponent {
         this.title.enable();
         this.title.setValue('');
         this.file = undefined;
+        this.fileWarning.set('');
         // `file = undefined` ne vide pas le champ natif : on le réinitialise aussi.
         const input = this.fileInput()?.nativeElement;
         if (input) input.value = '';

@@ -102,6 +102,20 @@ test("upload accepté : fichier rangé dans le stockage, média rattaché au sal
   assert.equal(fs.readFileSync(path.join(t.uploadsDir, stored.storageKey), "utf8"), "ID3-données");
 });
 
+test("upload d'une vidéo : média de type « video »", async () => {
+  const { token } = await t.createRoom();
+
+  const r = await t.upload(token, {
+    title: "Clip",
+    file: { content: "ftyp-données", type: "video/mp4", name: "clip.mp4" },
+  });
+  const body = await r.json();
+
+  assert.equal(r.status, 201);
+  assert.deepEqual({ kind: body.kind, mimeType: body.mimeType }, { kind: "video", mimeType: "video/mp4" });
+  assert.match(t.db.all(Media)[0].storageKey, /^[0-9a-f-]{36}\.mp4$/);
+});
+
 test("upload : aucun fichier orphelin si MongoDB échoue", async () => {
   const { token } = await t.createRoom();
   mock.method(Media, "create", async () => {

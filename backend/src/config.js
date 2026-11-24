@@ -27,8 +27,10 @@ export const MAX_FILE_SIZE = 25 * 1024 * 1024;
 export const MEDIA_URL_TTL_SECONDS =
   Number(process.env.MEDIA_URL_TTL_SECONDS) || 6 * 60 * 60;
 
-// Types MIME acceptés et famille de média correspondante. La vidéo (phase
-// 3.5) s'ajoutera ici.
+// Types MIME acceptés et famille de média correspondante. La famille décide du
+// lecteur affiché côté Angular (<audio> ou <video>). Seuls les conteneurs vidéo
+// lisibles nativement par les navigateurs courants sont acceptés (pas de .mov,
+// .avi ni .mkv).
 export const ALLOWED_MIME_TYPES = new Map([
   ["audio/mpeg", "audio"],
   ["audio/wav", "audio"],
@@ -36,6 +38,9 @@ export const ALLOWED_MIME_TYPES = new Map([
   ["audio/ogg", "audio"],
   ["audio/mp4", "audio"],
   ["audio/x-m4a", "audio"],
+  ["video/mp4", "video"],
+  ["video/webm", "video"],
+  ["video/ogg", "video"],
 ]);
 
 // --- Salons ---------------------------------------------------------------
