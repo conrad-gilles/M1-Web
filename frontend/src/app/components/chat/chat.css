@@ -1,0 +1,66 @@
+:host { display: block; }
+
+.chat { margin-bottom: 1rem; }
+
+.messages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 18rem;
+  margin: 0.5rem 0;
+  padding: 0.25rem;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.messages li {
+  display: flex;
+  flex-direction: column;
+  align-self: flex-start;
+  max-width: 85%;
+  padding: 0.4rem 0.7rem;
+  border-radius: 0.8rem;
+  background: var(--soft-bg);
+}
+
+/* Ses propres messages, à droite et en couleur. */
+.messages li.mine {
+  align-self: flex-end;
+  background: var(--highlight);
+  border: 1px solid var(--border);
+}
+
+.messages li.empty {
+  align-self: stretch;
+  max-width: none;
+  background: transparent;
+  opacity: 0.7;
+}
+
+.meta {
+  display: flex;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+
+.text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+form {
+  display: flex;
+  gap: 0.5rem;
+}
+
+form input { flex: 1; }
+
+.message.error {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.9rem;
+  background: var(--error-bg);
+  color: var(--error-fg);
+}

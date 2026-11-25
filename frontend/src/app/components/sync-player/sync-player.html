@@ -70,6 +70,10 @@
     @if (!url()) {
       <!-- URL pas encore reçue, ou fichier local pas encore choisi. -->
     } @else if (playerKind() === 'video') {
+      <!-- Le plein écran porte sur ce cadre (vidéo + messages de la discussion
+           par-dessus), pas sur la vidéo seule : rien ne s'affiche au-dessus
+           d'un élément <video> mis lui-même en plein écran. -->
+      <div #stage class="stage">
       <video
         #player
         [src]="url()"
@@ -85,6 +89,17 @@
         (ended)="onEnded()"
         (error)="onMediaError()"
       ></video>
+        @if (fullscreenActive()) {
+          <!-- Messages reçus pendant le plein écran : visibles quelques secondes. -->
+          <ol class="chat-overlay" aria-live="polite">
+            @for (message of chatToasts(); track message.id) {
+              <li class="chat-toast">
+                <b>{{ message.from.name }}</b> {{ message.text }}
+              </li>
+            }
+          </ol>
+        }
+      </div>
     } @else {
       <audio
         #player

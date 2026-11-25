@@ -79,6 +79,8 @@ export async function startTestApp({ limits = { creationsPerHour: Infinity } } =
     connect(token) {
       const socket = connectSocket(base, { auth: { token }, transports: ["websocket"], reconnection: false });
       sockets.push(socket);
+      // Envoyé juste après l'état initial : retenu dès la création du socket.
+      socket.chatHistory = new Promise((resolve) => socket.once("chat:history", resolve));
       socket.next = (event) => new Promise((resolve) => socket.once(event, resolve));
       // Attend le premier événement de ce nom qui satisfait la condition.
       socket.until = (event, predicate) =>

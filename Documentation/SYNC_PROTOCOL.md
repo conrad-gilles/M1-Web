@@ -59,6 +59,8 @@ Quand aucun média n'est chargé, `playback` vaut `null`.
 | `playback:state` | `{ version, playback, waitingFor, action, by }` | À chaque changement. `action` : `load`, `play`, `pause`, `seek`, `ended`, `buffering`, `resume`, `unload`. `by` : `{ id, name }` de l'auteur, ou `null` si le serveur a agi seul. |
 | `room:participants` | `[{ id, name }]` | Liste des participants connectés, à chaque arrivée ou départ. |
 | `media:changed` | - | Un média a été ajouté ou supprimé : recharger la liste. |
+| `chat:history` | `[{ id, from: { id, name }, text, at }]` | À chaque connexion : les 200 derniers messages de la discussion du salon (en mémoire, vidés au redémarrage du serveur). |
+| `chat:message` | `{ id, from: { id, name }, text, at }` | Nouveau message de la discussion. `from` vient du jeton de l'auteur, `at` est l'heure du serveur ; le texte est affiché comme du texte, jamais comme du HTML. En plein écran, le lecteur l'affiche quelques secondes par-dessus la vidéo. |
 | `room:updated` | `Room` | L'hôte a changé le code du salon. |
 | `room:closed` | `{ reason }` | Le salon n'est plus accessible, puis la connexion est fermée. `reason` : `closed` (fermé par l'hôte ou expiré), `left` (ce participant a quitté le salon, par exemple dans un autre onglet du même navigateur), `expired` (jeton de salon expiré). |
 
@@ -69,6 +71,7 @@ Quand aucun média n'est chargé, `playback` vaut `null`.
 | `clock:ping` | accusé de réception | `{ serverTime }` |
 | `playback:command` | une commande (ci-dessous) + accusé de réception | `{ ok: true }` ou `{ ok: false, message }` |
 | `buffer:start` | - | Le lecteur est bloqué depuis plus de 0,5 s. |
+| `chat:send` | texte + accusé de réception | Discussion : `{ ok: true }`, ou `{ ok: false, message }` (`Message vide ou trop long (500 caractères maximum)`, `Trop de messages, patientez un instant` au-delà de 5 messages en 5 s). Le message accepté est diffusé à tout le salon en `chat:message`. |
 | `p2p:signal` | `{ to, data }` | Partage direct : message de signalisation WebRTC (`data` : `{ sdp }` ou `{ candidate }`, 64 Ko au plus) pour le participant `to` du même salon. Le serveur le relaie tel quel en `p2p:signal` `{ from, data }` vers ce seul participant ; jamais vers un autre salon ni vers l'émetteur. |
 | `buffer:end` | - | Le lecteur peut de nouveau lire. |
 
@@ -134,6 +137,12 @@ Commandes :
 9. **Arrivants tardifs.** `room:state` donne l'état courant dès la connexion.
 10. **Salon vide.** Quand plus personne n'est connecté, la lecture passe en pause
     à la position courante.
+
+## Reconnexion
+
+À chaque (re)connexion du WebSocket, la page du salon relit le salon par
+`GET /rooms/current` : un changement de code (`room:updated`) survenu pendant
+la connexion ou une coupure est ainsi rattrapé.
 
 ## Partage direct (P2P)
 

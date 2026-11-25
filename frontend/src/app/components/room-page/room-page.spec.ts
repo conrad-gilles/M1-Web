@@ -76,9 +76,14 @@ describe('RoomPageComponent', () => {
     fixture.detectChanges();
   };
 
-  /** Le WebSocket reçoit l'état initial : la page passe « en ligne ». */
-  const goOnline = (participants = room().participants) => {
+  /**
+   * Le WebSocket reçoit l'état initial : la page passe « en ligne » et relit
+   * le salon (rattrape un changement de code manqué pendant la connexion).
+   */
+  const goOnline = (participants = room().participants, current = room()) => {
     socket.receive('room:state', { version: 0, playback: null, waitingFor: [], participants, serverTime: Date.now() });
+    fixture.detectChanges();
+    http.expectOne('/api/rooms/current').flush(current);
     fixture.detectChanges();
   };
 
@@ -349,6 +354,28 @@ describe('RoomPageComponent', () => {
       expect(element().querySelector('.code')?.textContent).toContain('NEW234');
       expect(TestBed.inject(RoomSessionService).session()?.code).toBe('NEW234');
       expect(navigate).toHaveBeenCalledWith(['/rooms', 'NEW234'], { replaceUrl: true });
+    });
+
+    it('changement de code manqué pendant la connexion : rattrapé dès que le WebSocket est en ligne', () => {
+      create();
+
+      // L'hôte a changé le code avant que ce participant ne soit connecté au salon.
+      goOnline(room().participants, room('NEW234'));
+
+      expect(element().querySelector('.code')?.textContent).toContain('NEW234');
+      expect(TestBed.inject(RoomSessionService).session()?.code).toBe('NEW234');
+      expect(navigate).toHaveBeenCalledWith(['/rooms', 'NEW234'], { replaceUrl: true });
+    });
+
+    it('après une coupure, la reconnexion relit le salon', () => {
+      create();
+      goOnline();
+
+      socket.receive('disconnect', 'transport close');
+      fixture.detectChanges();
+      goOnline(room().participants, room('NEW234')); // le code a changé pendant la coupure
+
+      expect(TestBed.inject(RoomSessionService).session()?.code).toBe('NEW234');
     });
 
     describe('autre onglet du même navigateur', () => {

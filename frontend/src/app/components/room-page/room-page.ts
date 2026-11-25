@@ -1,4 +1,4 @@
-import { Component, OnDestroy, computed, inject, signal, viewChild } from '@angular/core';
+import { Component, OnDestroy, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
@@ -12,6 +12,7 @@ import { SyncService } from '../../shared/services/sync.service';
 import { describeChange } from '../../shared/sync/describe-change';
 import { MediaLibraryComponent } from '../media-library/media-library';
 import { SyncPlayerComponent } from '../sync-player/sync-player';
+import { ChatComponent } from '../chat/chat';
 
 const SNACKBAR_DURATION = 5000;
 /** Les notices « qui a fait quoi » sont brèves : elles se succèdent vite. */
@@ -19,7 +20,7 @@ const NOTICE_DURATION = 3000;
 
 /** A room: its code, its participants, its media files and the synced player. */
 @Component({
-  imports: [MediaLibraryComponent, SyncPlayerComponent],
+  imports: [MediaLibraryComponent, SyncPlayerComponent, ChatComponent],
   templateUrl: './room-page.html',
   styleUrl: './room-page.css',
 })
@@ -70,6 +71,18 @@ export class RoomPageComponent implements OnDestroy {
 
     // Un autre participant a ajouté ou supprimé un média : la liste se recharge.
     this.sync.mediaChanged$.pipe(takeUntilDestroyed()).subscribe(() => this.library()?.load());
+
+    // À chaque (re)connexion du WebSocket, le salon est relu : un changement
+    // de code survenu pendant la connexion ou une coupure (événement
+    // « room:updated » manqué) est ainsi rattrapé.
+    let wasOnline = false;
+    effect(() => {
+      const online = this.online();
+      untracked(() => {
+        if (online && !wasOnline) this.refresh();
+        wasOnline = online;
+      });
+    });
 
     // L'hôte a changé le code du salon.
     this.sync.roomUpdated$.pipe(takeUntilDestroyed()).subscribe((room) => {
@@ -200,6 +213,8 @@ export class RoomPageComponent implements OnDestroy {
   private applyRoom(room: Room): void {
     this.room.set(room);
     if (this.urlCode !== room.code) {
+      // La session suit d'abord : le garde de la route compare son code à l'URL.
+      if (this.session()?.code !== room.code) this.sessionService.updateCode(room.code);
       this.urlCode = room.code;
       void this.router.navigate(['/rooms', room.code], { replaceUrl: true });
     }

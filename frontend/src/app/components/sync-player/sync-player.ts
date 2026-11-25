@@ -10,7 +10,9 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { HttpErrorResponse } from '@angular/common/http';
+import { ChatMessage } from '../../shared/models/chat-message.model';
 import { Media } from '../../shared/models/media.model';
 import { PlaybackState } from '../../shared/models/playback-state.model';
 import { MediaService } from '../../shared/services/media.service';
@@ -46,6 +48,11 @@ const P2P_ERRORS: Record<P2pError['code'], TranslationKey> = {
   'not-shared': 'player.p2pNotShared',
   closed: 'player.p2pInterrupted',
 };
+
+/** Durée d'affichage d'un message de la discussion par-dessus la vidéo en plein écran. */
+const CHAT_TOAST_MS = 6000;
+/** Messages affichés en même temps par-dessus la vidéo, au plus. */
+const CHAT_TOASTS = 3;
 
 /** Un saut natif à moins de cet écart de la position du salon n'est pas une demande de saut. */
 const NATIVE_SEEK_THRESHOLD = 0.5;
@@ -154,6 +161,15 @@ export class SyncPlayerComponent implements OnDestroy {
   });
 
   private readonly player = viewChild<ElementRef<HTMLMediaElement>>('player');
+  private readonly stage = viewChild<ElementRef<HTMLElement>>('stage');
+
+  // --- Plein écran et discussion par-dessus la vidéo ------------------------------
+  /** Le cadre de la vidéo est en plein écran (avec les messages par-dessus). */
+  readonly fullscreenActive = signal(false);
+  /** Messages reçus pendant le plein écran, affichés quelques secondes. */
+  readonly chatToasts = signal<ChatMessage[]>([]);
+  private readonly toastTimers = new Set<ReturnType<typeof setTimeout>>();
+  private readonly onFullscreenChange = () => this.fullscreenChanged();
   private readonly timer = setInterval(() => this.tick(), TICK_MS);
 
   /** Identifiant du média demandé en dernier, pour ignorer une réponse périmée. */
@@ -186,6 +202,12 @@ export class SyncPlayerComponent implements OnDestroy {
     });
 
     this.installDebugHook();
+
+    document.addEventListener('fullscreenchange', this.onFullscreenChange);
+    document.addEventListener('dblclick', this.onDocumentDoubleClick, true);
+    // Discussion : chaque message qui arrive pendant le plein écran apparaît
+    // par-dessus la vidéo (jamais l'historique, ni ceux d'avant le plein écran).
+    this.sync.chatMessage$.pipe(takeUntilDestroyed()).subscribe((message) => this.showMessage(message));
 
     // Un fichier ou un dossier vient d'être retenu (carte « Synchroniser ») :
     // si le lecteur attendait la copie de ce participant, il la cherche.
@@ -237,6 +259,9 @@ export class SyncPlayerComponent implements OnDestroy {
   ngOnDestroy(): void {
     clearInterval(this.timer);
     clearTimeout(this.nativeTimer);
+    this.toastTimers.forEach(clearTimeout);
+    document.removeEventListener('fullscreenchange', this.onFullscreenChange);
+    document.removeEventListener('dblclick', this.onDocumentDoubleClick, true);
     this.releaseLocalFile();
   }
 
@@ -428,8 +453,86 @@ export class SyncPlayerComponent implements OnDestroy {
     this.applyVolume();
   }
 
+  /** Plein écran du cadre (vidéo + discussion), pas de la vidéo seule. */
   fullscreen(): void {
-    void this.player()?.nativeElement.requestFullscreen?.();
+    const target = this.stage()?.nativeElement ?? this.player()?.nativeElement;
+    void target?.requestFullscreen?.().catch((error: unknown) => console.warn('[SyncPlayer] Plein écran refusé', error));
+  }
+
+  /**
+   * Double-clic sur la vidéo : plein écran du cadre (geste de l'utilisateur),
+   * ou sortie. Écouté en phase de capture sur le document : il est arrêté
+   * avant d'atteindre les contrôles natifs (Firefox mettrait sinon la vidéo
+   * seule en plein écran, sans les messages).
+   */
+  private onDoubleClick(event: MouseEvent): void {
+    const video = this.player()?.nativeElement;
+    if (!video || !this.stage() || !event.composedPath().includes(video)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+    else this.fullscreen();
+  }
+  private readonly onDocumentDoubleClick = (event: MouseEvent) => this.onDoubleClick(event);
+
+  /**
+   * Vidéo seule en plein écran (bouton natif ou double-clic de Firefox) :
+   * rien de la page ne s'affiche par-dessus, sauf les sous-titres. Le message
+   * devient donc un sous-titre en haut à droite, retiré après 6 s.
+   */
+  private showAsCue(video: HTMLMediaElement, message: ChatMessage): void {
+    if (typeof VTTCue === 'undefined' || typeof video.addTextTrack !== 'function') return;
+    this.chatTrack ??= video.addTextTrack('captions', 'Discussion');
+    this.chatTrack.mode = 'showing';
+    const start = video.currentTime;
+    const cue = new VTTCue(start, start + 3600, `${message.from.name} : ${message.text}`);
+    cue.line = 0; // en haut
+    cue.position = 98; // à droite
+    cue.align = 'end';
+    this.chatTrack.addCue(cue);
+    const track = this.chatTrack;
+    const timer = setTimeout(() => {
+      this.toastTimers.delete(timer);
+      track.removeCue(cue);
+    }, CHAT_TOAST_MS);
+    this.toastTimers.add(timer);
+  }
+  /** Piste de sous-titres de la discussion (vidéo seule en plein écran). */
+  private chatTrack?: TextTrack;
+
+  /**
+   * Le bouton plein écran natif de Firefox met la vidéo seule en plein
+   * écran. On tente de passer au cadre (pour voir les messages) sans quitter
+   * le plein écran : si le navigateur refuse (il exige un geste direct de
+   * l'utilisateur), la vidéo reste en plein écran, sans les messages.
+   */
+  private fullscreenChanged(): void {
+    const current = document.fullscreenElement;
+    const stage = this.stage()?.nativeElement;
+    if (stage && current && current === this.player()?.nativeElement) {
+      void stage
+        .requestFullscreen()
+        .catch((error: unknown) => console.warn('[SyncPlayer] Plein écran de la vidéo seule : sans les messages', error));
+    }
+    this.fullscreenActive.set(!!stage && current === stage);
+    if (!this.fullscreenActive()) this.chatToasts.set([]);
+  }
+
+  /** Message d'un autre pendant le plein écran : une bulle de 6 s, 3 au plus à la fois. */
+  private showMessage(message: ChatMessage): void {
+    if (message.from.id === this.session()?.participant.id) return;
+    const video = this.player()?.nativeElement;
+    if (video && document.fullscreenElement === video) {
+      this.showAsCue(video, message);
+      return;
+    }
+    if (!this.fullscreenActive()) return;
+    this.chatToasts.update((toasts) => [...toasts, message].slice(-CHAT_TOASTS));
+    const timer = setTimeout(() => {
+      this.toastTimers.delete(timer);
+      this.chatToasts.update((toasts) => toasts.filter((toast) => toast.id !== message.id));
+    }, CHAT_TOAST_MS);
+    this.toastTimers.add(timer);
   }
 
   /** Clic demandé par la règle d'autoplay : la lecture peut alors démarrer. */
@@ -651,6 +754,7 @@ export class SyncPlayerComponent implements OnDestroy {
     this.url.set('');
     this.releaseLocalFile();
     clearTimeout(this.nativeTimer);
+    this.chatTrack = undefined; // nouvel élément vidéo : nouvelle piste
     this.selfPlay = false;
     this.selfPause = false;
     this.selfSeek = null;

@@ -1,0 +1,32 @@
+<article class="card chat">
+  <h2>{{ t('chat.title') }}</h2>
+
+  <ol #list class="messages" [attr.aria-label]="t('chat.title')" aria-live="polite">
+    @for (message of messages(); track message.id) {
+      <li [class.mine]="isMine(message.from.id)">
+        <span class="meta">
+          <b>{{ isMine(message.from.id) ? t('chat.you') : message.from.name }}</b>
+          <time>{{ time(message.at) }}</time>
+        </span>
+        <span class="text">{{ message.text }}</span>
+      </li>
+    } @empty {
+      <li class="empty">{{ t('chat.empty') }}</li>
+    }
+  </ol>
+
+  <!-- Bouton ou touche Entrée : envoi sans recharger la page. -->
+  <form (submit)="$event.preventDefault(); send()">
+    <input
+      [formControl]="text"
+      [attr.maxlength]="maxLength"
+      [placeholder]="t('chat.placeholder')"
+      [attr.aria-label]="t('chat.label')"
+      autocomplete="off"
+    />
+    <button type="submit" [disabled]="text.invalid || sending() || !online()">{{ t('chat.send') }}</button>
+  </form>
+  @if (error()) {
+    <p class="message error" role="alert">{{ server(error()) }}</p>
+  }
+</article>

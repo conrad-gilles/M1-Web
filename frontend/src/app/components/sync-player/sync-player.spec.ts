@@ -316,6 +316,147 @@ describe('SyncPlayerComponent', () => {
     });
   });
 
+  describe('plein écran : messages de la discussion par-dessus la vidéo', () => {
+    const chat = (id: string, from: { id: string; name: string }, text: string) =>
+      socket.receive('chat:message', { id, from, text, at: NOW });
+    let fullscreenElement: Element | null = null;
+    const stage = () => host().querySelector<HTMLElement>('.stage')!;
+    const toasts = () => Array.from(host().querySelectorAll('.chat-toast')).map((li) => li.textContent?.trim());
+    const enterFullscreen = (element: Element | null = stage()) => {
+      fullscreenElement = element;
+      document.dispatchEvent(new Event('fullscreenchange'));
+      fixture.detectChanges();
+    };
+
+    beforeEach(() => {
+      fullscreenElement = null;
+      Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => fullscreenElement });
+      TestBed.inject(RoomSessionService).open({
+        room: { code: 'K7P2QX', participants: [], expiresAt: '2026-11-26T10:00:00.000Z' },
+        participant: { id: 'moi', name: 'Moi' },
+        token: 'jeton',
+      });
+      loadMedia(playback(), {}, media('m1', 'video'));
+    });
+    afterEach(() => {
+      delete (document as unknown as Record<string, unknown>)['fullscreenElement'];
+    });
+
+    it('le bouton Plein écran met le cadre (vidéo + messages) en plein écran, pas la vidéo seule', () => {
+      const request = vi.fn(() => Promise.resolve());
+      stage().requestFullscreen = request;
+
+      host().querySelector<HTMLButtonElement>('.local button:last-child')!.click();
+
+      expect(request).toHaveBeenCalled();
+    });
+
+    it('un message d’un autre apparaît par-dessus la vidéo, puis disparaît après quelques secondes', () => {
+      enterFullscreen();
+
+      chat('c1', SAM, 'Regarde cette scène !');
+      fixture.detectChanges();
+      expect(toasts()).toEqual(['Sam Regarde cette scène !']);
+      expect(getComputedStyle(host().querySelector('.chat-overlay')!).pointerEvents).toBe('none');
+
+      advance(6000);
+      expect(toasts()).toEqual([]);
+    });
+
+    it('hors plein écran, ses propres messages et l’historique : rien par-dessus la vidéo', () => {
+      chat('c1', SAM, 'avant le plein écran');
+      enterFullscreen();
+      chat('c2', { id: 'moi', name: 'Moi' }, 'mon message');
+      fixture.detectChanges();
+
+      expect(toasts()).toEqual([]);
+
+      enterFullscreen(null); // sortie du plein écran
+      chat('c3', SAM, 'après');
+      fixture.detectChanges();
+      expect(host().querySelector('.chat-overlay')).toBeNull();
+    });
+
+    it('trois messages au plus à la fois', () => {
+      enterFullscreen();
+
+      for (const n of [1, 2, 3, 4]) chat(`c${n}`, SAM, `message ${n}`);
+      fixture.detectChanges();
+
+      expect(toasts()).toEqual(['Sam message 2', 'Sam message 3', 'Sam message 4']);
+    });
+
+    it('vidéo seule en plein écran (bouton natif de Firefox) : tente le cadre sans quitter le plein écran', async () => {
+      const exit = vi.fn(() => Promise.resolve());
+      const request = vi.fn(() => Promise.reject(new TypeError('refusé hors geste')));
+      document.exitFullscreen = exit;
+      stage().requestFullscreen = request;
+
+      enterFullscreen(host().querySelector('video'));
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(request).toHaveBeenCalled();
+      // Refusé : la vidéo reste en plein écran, on n'en sort surtout pas.
+      expect(exit).not.toHaveBeenCalled();
+    });
+
+    it('double-clic sur la vidéo : plein écran du cadre, puis sortie', () => {
+      const request = vi.fn(() => Promise.resolve());
+      const exit = vi.fn(() => Promise.resolve());
+      stage().requestFullscreen = request;
+      document.exitFullscreen = exit;
+      const video = host().querySelector('video')!;
+
+      // Les contrôles natifs ne doivent pas recevoir le double-clic (Firefox mettrait la vidéo seule en plein écran).
+      const reachedVideo = vi.fn();
+      video.addEventListener('dblclick', reachedVideo);
+      const first = new MouseEvent('dblclick', { cancelable: true, bubbles: true });
+      video.dispatchEvent(first);
+      expect(first.defaultPrevented).toBe(true);
+      expect(reachedVideo).not.toHaveBeenCalled();
+      expect(request).toHaveBeenCalled();
+
+      enterFullscreen();
+      video.dispatchEvent(new MouseEvent('dblclick', { cancelable: true, bubbles: true }));
+      expect(exit).toHaveBeenCalled();
+
+      // Un double-clic ailleurs dans la page n'est pas touché.
+      const elsewhere = new MouseEvent('dblclick', { cancelable: true, bubbles: true });
+      host().querySelector('h2')!.dispatchEvent(elsewhere);
+      expect(elsewhere.defaultPrevented).toBe(false);
+    });
+
+    it('vidéo seule en plein écran (Firefox) : le message devient un sous-titre en haut à droite, retiré après 6 s', () => {
+      const cues: { text: string; line: number; align: string }[] = [];
+      const track = { mode: 'disabled', addCue: vi.fn((cue) => cues.push(cue)), removeCue: vi.fn() };
+      const video = host().querySelector('video')!;
+      (video as unknown as { addTextTrack: unknown }).addTextTrack = vi.fn(() => track);
+      class FakeCue {
+        line = -1;
+        position = 0;
+        align = '';
+        constructor(public startTime: number, public endTime: number, public text: string) {}
+      }
+      vi.stubGlobal('VTTCue', FakeCue);
+      stage().requestFullscreen = vi.fn(() => Promise.reject(new TypeError('refusé hors geste')));
+      enterFullscreen(video);
+
+      chat('c1', SAM, 'Regarde !');
+
+      expect(track.mode).toBe('showing');
+      expect(cues.map(({ text, line, align }) => ({ text, line, align }))).toEqual([
+        { text: 'Sam : Regarde !', line: 0, align: 'end' },
+      ]);
+      advance(6000);
+      expect(track.removeCue).toHaveBeenCalledWith(cues[0]);
+      vi.unstubAllGlobals();
+    });
+
+    it('pas de controlslist="nofullscreen" : il désactive le clic sur l’image dans Chrome', () => {
+      expect(host().querySelector('video')?.hasAttribute('controlslist')).toBe(false);
+    });
+  });
+
   describe('partage direct (P2P)', () => {
     const p2pMedia = (ownerId = 'alex'): Media => ({
       ...media('p1', 'video'),

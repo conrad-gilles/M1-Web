@@ -2,6 +2,7 @@ import { Injectable, InjectionToken, computed, inject, signal } from '@angular/c
 import { Subject } from 'rxjs';
 import { io } from 'socket.io-client';
 import { I18nService } from '../i18n/i18n.service';
+import { ChatMessage } from '../models/chat-message.model';
 import { Participant } from '../models/participant.model';
 import { PlaybackChange } from '../models/playback-change.model';
 import { CommandResult, PlaybackCommand } from '../models/playback-command.model';
@@ -29,6 +30,9 @@ export const SYNC_SOCKET_FACTORY = new InjectionToken<SyncSocketFactory>('SYNC_S
   providedIn: 'root',
   factory: () => (token) => io({ auth: { token } }),
 });
+
+/** Messages de discussion gardés, comme côté serveur. */
+const CHAT_HISTORY = 200;
 
 /** Nombre d'allers-retours utilisés pour mesurer le décalage d'horloge. */
 const CLOCK_SAMPLES = 5;
@@ -64,6 +68,8 @@ export class SyncService {
   readonly participants = signal<Participant[]>([]);
   /** Décalage mesuré entre l'horloge du serveur et l'horloge locale, en ms. */
   readonly clockOffset = signal(0);
+  /** Discussion du salon (les 200 derniers messages, comme le serveur). */
+  readonly chatMessages = signal<ChatMessage[]>([]);
 
   private readonly changeSubject = new Subject<PlaybackChange>();
   private readonly mediaChangedSubject = new Subject<void>();
@@ -78,6 +84,10 @@ export class SyncService {
   readonly roomUpdated$ = this.roomUpdatedSubject.asObservable();
   /** Le salon n'est plus accessible : fermé, expiré ou quitté. */
   readonly roomClosed$ = this.roomClosedSubject.asObservable();
+
+  private readonly chatMessageSubject = new Subject<ChatMessage>();
+  /** Chaque nouveau message de la discussion, au moment où il arrive (pas l'historique). */
+  readonly chatMessage$ = this.chatMessageSubject.asObservable();
 
   private readonly signalSubject = new Subject<{ from: string; data: unknown }>();
   /** Signalisation WebRTC du partage direct, relayée par le serveur (voir P2pService). */
@@ -120,6 +130,12 @@ export class SyncService {
     socket.on('room:participants', (participants: Participant[]) => this.participants.set(participants));
     socket.on('media:changed', () => this.mediaChangedSubject.next());
     socket.on('p2p:signal', (message: { from: string; data: unknown }) => this.signalSubject.next(message));
+    // Discussion : l'historique arrive à chaque (re)connexion, puis chaque message.
+    socket.on('chat:history', (messages: ChatMessage[]) => this.chatMessages.set(messages));
+    socket.on('chat:message', (message: ChatMessage) => {
+      this.chatMessages.update((messages) => [...messages, message].slice(-CHAT_HISTORY));
+      this.chatMessageSubject.next(message);
+    });
     socket.on('room:updated', (room: Room) => this.roomUpdatedSubject.next(room));
     socket.on('room:closed', (event?: { reason?: RoomClosedReason }) =>
       this.roomClosedSubject.next(event?.reason ?? 'closed'),
@@ -146,6 +162,16 @@ export class SyncService {
     this.playback.set(null);
     this.waitingFor.set([]);
     this.participants.set([]);
+    this.chatMessages.set([]);
+  }
+
+  /** Envoie un message à la discussion du salon ; il reviendra par "chat:message". */
+  sendChat(text: string): Promise<CommandResult> {
+    const socket = this.socket;
+    if (!socket || !this.online()) {
+      return Promise.resolve({ ok: false, message: this.i18n.t('sync.connectionLost') });
+    }
+    return new Promise((resolve) => socket.emit('chat:send', text, (result: CommandResult) => resolve(result)));
   }
 
   /** Envoie une commande ; le nouvel état reviendra par "playback:state". */

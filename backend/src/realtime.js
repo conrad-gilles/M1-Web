@@ -6,6 +6,7 @@ import { Room } from "./models/Room.js";
 import { openRoomSession } from "./services/roomService.js";
 import { presence } from "./sync/presence.js";
 import { RoomSync } from "./sync/roomSync.js";
+import { RoomChat } from "./sync/chat.js";
 
 // Une commande de lecture repousse l'expiration du salon, au plus à ce rythme.
 const ACTIVITY_REFRESH_MS = 5 * 60 * 1000;
@@ -38,7 +39,7 @@ export function attachRealtime(httpServer, { now = Date.now } = {}) {
           io.to(roomId).emit("playback:state", payload);
         },
       });
-      hubs.set(roomId, { sync, touchedAt: now() });
+      hubs.set(roomId, { sync, chat: new RoomChat({ now }), touchedAt: now() });
     }
     return hubs.get(roomId);
   }
@@ -86,6 +87,8 @@ export function attachRealtime(httpServer, { now = Date.now } = {}) {
       serverTime: now(),
     });
     io.to(roomId).emit("room:participants", presence.list(roomId));
+    // Discussion : l'arrivant reçoit les derniers messages du salon.
+    socket.emit("chat:history", hub.chat.history());
 
     /** Vrai tant que le jeton de la connexion n'a pas expiré. */
     function stillAllowed() {
@@ -147,6 +150,20 @@ export function attachRealtime(httpServer, { now = Date.now } = {}) {
       } catch (error) {
         console.error("[p2p] Erreur de relais de la signalisation", error);
       }
+    });
+
+    /** Discussion du salon : message vérifié, horodaté, puis diffusé à tout le salon. */
+    socket.on("chat:send", (text, ack) => {
+      const reply = typeof ack === "function" ? ack : () => {};
+      if (!stillAllowed()) return reply({ ok: false, message: "Salon fermé ou jeton invalide" });
+      const result = hub.chat.post(participant, text);
+      if (!result.ok) {
+        console.warn(`[chat] Message refusé de ${participant.id} : ${result.message}`);
+        return reply(result);
+      }
+      io.to(roomId).emit("chat:message", result.message);
+      reply({ ok: true });
+      void touch(roomId, hub);
     });
 
     socket.on("buffer:start", () => {

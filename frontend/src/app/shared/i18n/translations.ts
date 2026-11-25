@@ -204,6 +204,15 @@ export const FR = {
   'upload.folderStopped': 'Envoi du dossier arrêté après {done} fichier(s) : {reason}',
   'upload.folderSkipped': 'Ignorés (format non accepté) : {files}',
 
+  // --- Discussion ------------------------------------------------------------------
+  'chat.title': 'Discussion',
+  'chat.empty': 'Aucun message pour l’instant : dites bonjour !',
+  'chat.placeholder': 'Votre message…',
+  'chat.label': 'Message à envoyer au salon',
+  'chat.send': 'Envoyer',
+  'chat.you': 'Vous',
+  'chat.failed': 'Message non envoyé.',
+
   // --- Partage direct (P2P) ------------------------------------------------------
   'p2p.title': 'Partager en direct (P2P)',
   'p2p.hint':
@@ -418,6 +427,14 @@ export const EN: Record<TranslationKey, string> = {
   'upload.folderStopped': 'Folder upload stopped after {done} file(s): {reason}',
   'upload.folderSkipped': 'Skipped (format not accepted): {files}',
 
+  'chat.title': 'Chat',
+  'chat.empty': 'No messages yet: say hello!',
+  'chat.placeholder': 'Your message…',
+  'chat.label': 'Message to send to the room',
+  'chat.send': 'Send',
+  'chat.you': 'You',
+  'chat.failed': 'Message not sent.',
+
   'p2p.title': 'Share live (P2P)',
   'p2p.hint':
     'The file stays on your device and goes directly to the other participants’ browsers, in original quality. Keep this page open during playback.',
@@ -473,6 +490,8 @@ export const SERVER_MESSAGES_EN: Record<string, string> = {
   'Liste de fichiers requise (1000 au plus par envoi)': 'File list required (1000 at most per request)',
   'Chemin du fichier requis dans le dossier': 'File path inside the folder required',
   'Média local : aucun fichier à télécharger sur le serveur': 'Local media: there is no file to download on the server',
+  'Message vide ou trop long (500 caractères maximum)': 'Empty or too long message (500 characters at most)',
+  'Trop de messages, patientez un instant': 'Too many messages, wait a moment',
   'Média partagé en direct : aucun fichier à télécharger sur le serveur':
     'Media shared live: there is no file to download on the server',
 };

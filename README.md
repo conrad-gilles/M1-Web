@@ -85,6 +85,18 @@ touches multimédia pilotent **tout le salon**. Les boutons de la page (±10 s,
 lecture, volume, plein écran) restent disponibles. Le volume reste propre à
 chaque participant.
 
+### Discussion
+
+La carte **« Discussion »** du salon permet d'écrire aux autres participants
+en temps réel (Entrée pour envoyer). Un arrivant voit les 200 derniers
+messages ; la discussion est gardée en mémoire par le serveur (vidée à son
+redémarrage). 500 caractères au plus par message, 5 messages en 5 s au plus.
+**En plein écran**, un message des autres apparaît quelques secondes en haut à
+droite de la vidéo puis s'efface. Avec le bouton « Plein écran » de la page
+ou un double-clic, c'est une bulle par-dessus l'image ; avec le bouton plein
+écran natif du navigateur (seule la vidéo est alors en plein écran), le
+message s'affiche comme un sous-titre.
+
 ### Mode clair / sombre
 
 Le bouton 🌙 / ☀️ de l'en-tête passe l'interface en mode sombre ou clair. À la
