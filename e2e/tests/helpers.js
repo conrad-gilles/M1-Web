@@ -3,9 +3,21 @@ import { expect } from "@playwright/test";
 
 export const SONG = path.resolve(import.meta.dirname, "../../frontend/fichiers-audio-de-test/song1.mp3");
 
+/**
+ * Active l'aide de test du lecteur (window.__syncPlayer.drift) : elle simule
+ * une vraie dérive, qu'un saut fait par script ne simule plus (il compterait
+ * comme un saut de l'utilisateur avec les contrôles natifs).
+ */
+export const enableDebug = (context) =>
+  context.addInitScript(() => localStorage.setItem("sharing_platform_debug", "1"));
+
+/** Décale le lecteur de `seconds`, comme une dérive réelle. */
+export const drift = (page, seconds) => page.evaluate((s) => window.__syncPlayer.drift(s), seconds);
+
 /** Nouvelle « personne » : un contexte de navigateur, comme une fenêtre privée. */
 export async function newPerson(browser, options = {}) {
   const context = await browser.newContext(options);
+  await enableDebug(context);
   return context.newPage();
 }
 
@@ -46,7 +58,7 @@ export const uploadCard = (page) =>
 export async function uploadSong(page, title = "Song 1") {
   const card = uploadCard(page);
   await card.getByRole("textbox", { name: "Titre" }).fill(title);
-  await card.locator('input[type="file"]').setInputFiles(SONG);
+  await card.locator('input[type="file"]:not([webkitdirectory])').setInputFiles(SONG);
   await card.getByRole("button", { name: "Envoyer" }).click();
   await expect(page.locator(".media-card", { hasText: title })).toBeVisible();
 }

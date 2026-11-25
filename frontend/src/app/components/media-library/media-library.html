@@ -54,10 +54,48 @@
         @if (uploadSuccess()) {
           <p class="message success" role="status">{{ uploadSuccess() }}</p>
         }
+
+        <h3>{{ t('upload.folder') }}</h3>
+        <label>
+          {{ t('local.folderInput') }}
+          <input
+            #folderInput
+            type="file"
+            webkitdirectory
+            multiple
+            [disabled]="busy()"
+            (change)="chooseUploadFolder($event)"
+          />
+        </label>
+        @if (folderPlan(); as plan) {
+          <p class="message warning" role="status">
+            {{ t('upload.folderWarning', { folder: plan.folder, count: plan.files.length, size: formatSize(plan.size) }) }}
+          </p>
+          @if (plan.skipped.length > 0) {
+            <p class="message warning" role="status">{{ t('upload.folderSkipped', { files: plan.skipped.join(', ') }) }}</p>
+          }
+          <button type="button" (click)="uploadFolder()" [disabled]="busy() || plan.files.length === 0">
+            {{ t('upload.sendFolder') }}
+          </button>
+        }
+        @if (folderProgress(); as progress) {
+          <p class="message loading" role="status">
+            {{ t('upload.folderProgress', { done: progress.done + 1, total: progress.total, name: progress.name }) }}
+          </p>
+        }
+        @if (folderMessage()) {
+          <p class="message success" role="status">{{ folderMessage() }}</p>
+        }
+        @if (folderError()) {
+          <p class="message error" role="alert">{{ folderError() }}</p>
+        }
       </article>
 
       <!-- Fonction distincte de l'upload : le fichier n'est jamais envoyé. -->
       <app-local-media (declared)="onLocalDeclared()" />
+
+      <!-- Partage direct (P2P) : le fichier part de cet appareil vers les autres navigateurs. -->
+      <app-p2p-share (shared)="onLocalDeclared()" />
     </div>
 
     <article class="card">
@@ -88,7 +126,17 @@
           <div class="media-card" [class.playing]="activeMediaId() === track.id">
             <div class="media-info">
               <b>{{ track.title }}</b>
-              @if (track.source === 'local') {
+              @if (track.folder) {
+                <small class="folder">📁 {{ t('library.folder', { folder: track.folder }) }}</small>
+              }
+              @if (track.source === 'p2p') {
+                <span class="badge local">{{ t('library.p2pBadge', { name: track.owner?.name ?? '' }) }}</span>
+                <small
+                  >{{ track.kind === 'video' ? t('library.video') : t('library.audio') }} ·
+                  {{ t('library.duration', { duration: formatDuration(track.duration ?? 0) }) }} ·
+                  {{ formatSize(track.size) }}</small
+                >
+              } @else if (track.source === 'local') {
                 <span class="badge local">{{ t('library.localBadge') }}</span>
                 <small
                   >{{ track.kind === 'video' ? t('library.video') : t('library.audio') }} ·
@@ -114,6 +162,17 @@
               >
                 ▶
               </button>
+              @if (track.source === 'upload') {
+                <button
+                  type="button"
+                  class="download"
+                  (click)="download(track)"
+                  [attr.title]="t('library.downloadTitle', { title: track.title })"
+                  [attr.aria-label]="t('library.downloadTitle', { title: track.title })"
+                >
+                  ⬇
+                </button>
+              }
               <button
                 type="button"
                 class="danger"

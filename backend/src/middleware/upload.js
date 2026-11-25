@@ -18,6 +18,8 @@ export const UNSUPPORTED_FORMAT = "Format de média non accepté";
  * la liste blanche avant toute écriture.
  */
 export const upload = multer({
+  // Noms de fichiers en UTF-8 : sans cela, « été.mp3 » arrive en « Ã©tÃ©.mp3 ».
+  defParamCharset: "utf8",
   storage: multer.diskStorage({
     destination: (_request, _file, callback) => callback(null, TEMP_DIR),
     filename: (_request, file, callback) => {

@@ -38,4 +38,24 @@
   @if (success()) {
     <p class="message success" role="status">{{ success() }}</p>
   }
+
+  <h3>{{ t('local.folderTitle') }}</h3>
+  <p class="hint">{{ t('local.folderHint') }}</p>
+  <label>
+    {{ t('local.folderInput') }}
+    <input type="file" webkitdirectory multiple [disabled]="folderBusy()" (change)="chooseFolder($event)" />
+  </label>
+  @if (folderProgress(); as progress) {
+    <p class="message loading" role="status">{{ t('local.folderReading', progress) }}</p>
+    <progress [attr.value]="progress.done" [attr.max]="progress.total"></progress>
+  }
+  @if (folderResult()) {
+    <p class="message success" role="status">{{ folderResult() }}</p>
+  }
+  @for (problem of folderProblems(); track problem) {
+    <p class="message warning" role="status">{{ problem }}</p>
+  }
+  @if (folderError()) {
+    <p class="message error" role="alert">{{ server(folderError()) }}</p>
+  }
 </article>

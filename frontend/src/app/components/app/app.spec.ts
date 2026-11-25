@@ -48,6 +48,25 @@ describe('AppComponent', () => {
     expect(links()).toEqual([{ text: 'Accueil', href: '/' }]);
   });
 
+  it('le bouton 🌙 / ☀️ passe en mode sombre puis en mode clair', () => {
+    fixture = TestBed.createComponent(AppComponent);
+    fixture.detectChanges();
+    const toggle = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('.theme-toggle')!;
+    const start = document.documentElement.dataset['theme'];
+
+    toggle.click();
+    fixture.detectChanges();
+    const switched = document.documentElement.dataset['theme'];
+    expect(switched).not.toBe(start);
+    expect(toggle.getAttribute('aria-pressed')).toBe(String(switched === 'dark'));
+    expect(toggle.textContent?.trim()).toBe(switched === 'dark' ? '☀️' : '🌙');
+    expect(toggle.title).toBe(switched === 'dark' ? 'Passer en mode clair' : 'Passer en mode sombre');
+
+    toggle.click();
+    fixture.detectChanges();
+    expect(document.documentElement.dataset['theme']).toBe(start);
+  });
+
   it('propose de revenir au salon en cours, et suit la session', () => {
     fixture = TestBed.createComponent(AppComponent);
     const session = TestBed.inject(RoomSessionService);

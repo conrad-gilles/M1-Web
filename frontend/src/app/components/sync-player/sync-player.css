@@ -6,13 +6,13 @@
   padding: 0.15rem 0.6rem;
   border-radius: 999px;
   font-size: 0.8rem;
-  color: #1e4620;
-  background: #e6f4ea;
+  color: var(--success-fg);
+  background: var(--success-bg);
 }
 
 .status.offline {
-  color: #611a15;
-  background: #fdecea;
+  color: var(--error-fg);
+  background: var(--error-bg);
 }
 
 .now-playing { margin: 0.5rem 0; }
@@ -28,7 +28,7 @@ video {
 .local-pick {
   margin: 0.75rem 0;
   padding: 0.75rem 1rem;
-  border: 1px dashed rgba(0, 0, 0, 0.25);
+  border: 1px dashed var(--border);
   border-radius: 0.5rem;
 }
 
@@ -72,8 +72,8 @@ video {
 }
 
 .local button {
-  color: #17312a;
-  background: #e6f0ec;
+  color: var(--text);
+  background: var(--soft-bg);
 }
 
 .local input { width: 6rem; }
@@ -104,8 +104,8 @@ video {
 }
 
 .message.error {
-  background: #fdecea;
-  color: #611a15;
+  background: var(--error-bg);
+  color: var(--error-fg);
 }
 
 .message.error button {
@@ -114,6 +114,6 @@ video {
 }
 
 .message.loading {
-  background: #eef2ff;
-  color: #1e2a5c;
+  background: var(--info-bg);
+  color: var(--info-fg);
 }

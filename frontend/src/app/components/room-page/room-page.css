@@ -48,7 +48,7 @@
 .participants li {
   padding: 0.3rem 0.7rem;
   border-radius: 999px;
-  background: #e6f0ec;
+  background: var(--soft-bg);
 }
 
 .badge {
@@ -68,6 +68,6 @@
 }
 
 .message.error {
-  background: #fdecea;
-  color: #611a15;
+  background: var(--error-bg);
+  color: var(--error-fg);
 }

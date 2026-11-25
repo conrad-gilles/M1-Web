@@ -1,5 +1,13 @@
-import { Injectable } from '@angular/core';
-import { LocalFileInfo } from '../local-media/local-media';
+import { Injectable, signal } from '@angular/core';
+import { Media } from '../models/media.model';
+import { FolderFile } from '../local-media/local-folder';
+import { LocalFileInfo, sameDuration } from '../local-media/local-media';
+
+/** Résultat de la recherche d'un média de dossier dans le dossier choisi. */
+export type FolderLookup =
+  | { status: 'found'; chosen: ChosenFile }
+  | { status: 'missing' }
+  | { status: 'mismatch'; duration: number };
 
 /** Fichier local choisi pour un média, avec ce que le navigateur en a lu. */
 export interface ChosenFile {
@@ -21,6 +29,8 @@ const PROBE_TIMEOUT_MS = 15_000;
 @Injectable({ providedIn: 'root' })
 export class LocalFilesService {
   private readonly chosen = new Map<string, ChosenFile>();
+  /** Augmente à chaque fichier ou dossier retenu : le lecteur en attente réessaie. */
+  readonly changes = signal(0);
 
   /**
    * Lit les métadonnées du fichier avec un élément <video> hors de la page
@@ -62,6 +72,7 @@ export class LocalFilesService {
   /** Retient le fichier choisi pour ce média, jusqu'au rechargement de la page. */
   remember(mediaId: string, chosen: ChosenFile): void {
     this.chosen.set(mediaId, chosen);
+    this.changes.update((n) => n + 1);
   }
 
   get(mediaId: string): ChosenFile | undefined {
@@ -70,5 +81,33 @@ export class LocalFilesService {
 
   forget(mediaId: string): void {
     this.chosen.delete(mediaId);
+  }
+
+  // --- Dossiers locaux ------------------------------------------------------
+
+  /** Dossiers choisis pendant la session : nom du dossier -> chemin -> fichier. */
+  private readonly folders = new Map<string, Map<string, File>>();
+
+  rememberFolder(folder: string, files: FolderFile[]): void {
+    this.folders.set(folder, new Map(files.map((entry) => [entry.path, entry.file])));
+    this.changes.update((n) => n + 1);
+  }
+
+  hasFolder(folder: string): boolean {
+    return this.folders.has(folder);
+  }
+
+  /**
+   * Cherche la copie d'un média de dossier dans le dossier de même nom choisi
+   * par ce participant : même chemin, même durée (à 1 s près).
+   */
+  async fromFolder(media: Media): Promise<FolderLookup> {
+    const file = media.folder ? this.folders.get(media.folder)?.get(media.originalName) : undefined;
+    if (!file) return { status: 'missing' };
+    const info = await this.probe(file);
+    if (!sameDuration(media.duration ?? 0, info.duration)) return { status: 'mismatch', duration: info.duration };
+    const chosen = { file, info };
+    this.chosen.set(media.id, chosen); // sans `changes` : c'est le lecteur qui cherche
+    return { status: 'found', chosen };
   }
 }

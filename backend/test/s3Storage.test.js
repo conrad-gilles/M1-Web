@@ -122,6 +122,25 @@ test("S3 signedUrl : URL présignée GET, type forcé, durée plafonnée à 7 jo
   assert.ok(lifetime <= 7 * 24 * 3600 * 1000 && lifetime > 7 * 24 * 3600 * 1000 - 60_000);
 });
 
+test("S3 signedUrl de téléchargement : pièce jointe au nom d'origine, accents compris", async () => {
+  const { storage, presigned } = fakeStorage();
+
+  await storage.signedUrl({ key: KEY, mimeType: "video/mp4", expiresInSeconds: 60, downloadName: "Été \"2026\".mp4" });
+
+  assert.equal(
+    presigned[0].command.input.ResponseContentDisposition,
+    "attachment; filename=\"_t_ _2026_.mp4\"; filename*=UTF-8''%C3%89t%C3%A9%20%222026%22.mp4",
+  );
+});
+
+test("S3 signedUrl de lecture : pas de pièce jointe", async () => {
+  const { storage, presigned } = fakeStorage();
+
+  await storage.signedUrl({ key: KEY, mimeType: "video/mp4", expiresInSeconds: 60 });
+
+  assert.equal(presigned[0].command.input.ResponseContentDisposition, undefined);
+});
+
 test("S3 remove : supprime toutes les versions de ce fichier, et seulement lui", async () => {
   const { storage, sent } = fakeStorage({
     versions: [

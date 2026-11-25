@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import {
   createRoom,
+  drift,
+  enableDebug,
   gap,
   joinRoom,
   newPerson,
@@ -62,17 +64,18 @@ test("lecture, saut et pause : les deux lecteurs restent à moins de 0,5 s", asy
   expect(await gap(alex, sam)).toBeLessThan(0.1);
 });
 
-test("un participant en retard est rattrapé, un participant en avance aussi", async ({ page, browser }) => {
+test("un participant en retard est rattrapé, un participant en avance aussi", async ({ page, context, browser }) => {
+  await enableDebug(context);
   const { alex, sam } = await roomWithMedia(page, browser);
   await playButton(alex).click();
   await expect.poll(async () => (await player(sam)).time).toBeGreaterThan(1);
 
   // Retard de 5 s chez Sam : rattrapé par un saut.
-  await sam.evaluate(() => (document.querySelector("audio").currentTime -= 5));
+  await drift(sam, -5);
   await expect.poll(() => gap(alex, sam)).toBeLessThan(0.5);
 
   // Avance de 0,5 s chez Alex : rattrapée en douceur, sans saut (vitesse 0,95).
-  await alex.evaluate(() => (document.querySelector("audio").currentTime += 0.5));
+  await drift(alex, 0.5);
   await expect.poll(async () => (await player(alex)).rate).toBe(0.95);
   await expect.poll(() => gap(alex, sam), { timeout: 30_000 }).toBeLessThan(0.15);
   await expect.poll(async () => (await player(alex)).rate, { timeout: 30_000 }).toBe(1);

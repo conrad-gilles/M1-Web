@@ -57,8 +57,11 @@ export const ROOM_TTL_MS = (Number(process.env.ROOM_TTL_HOURS) || 24) * 60 * 60 
 // Le projet vise de petits groupes (2 à 10 personnes par salon).
 export const MAX_PARTICIPANTS = 10;
 
-// Quota par salon : le stockage gratuit est partagé entre tous les salons.
-export const MAX_MEDIA_PER_ROOM = 20;
+// Pas de nombre maximal de médias par salon (décision du projet, novembre
+// 2026) : la limite est l'espace du stockage gratuit, signalé par une erreur
+// 507 quand il est plein. Un dossier local accepte au plus ce nombre de
+// fichiers par requête, pour garder des requêtes de taille raisonnable.
+export const MAX_FOLDER_FILES_PER_REQUEST = 1000;
 
 export const MAX_NAME_LENGTH = 30;
 

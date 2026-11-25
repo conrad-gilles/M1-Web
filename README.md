@@ -77,6 +77,20 @@ fenêtre de navigation privée ou un autre navigateur.
 Les fichiers de `frontend/fichiers-audio-de-test/` servent pour les essais, et
 les courtes vidéos de `e2e/fixtures/` (MP4, MKV, AVI, son silencieux) pour la vidéo.
 
+### Lecteur
+
+Le lecteur du salon affiche les contrôles habituels du navigateur, y compris
+en plein écran : lecture, pause, barre de temps, clavier (espace, flèches) et
+touches multimédia pilotent **tout le salon**. Les boutons de la page (±10 s,
+lecture, volume, plein écran) restent disponibles. Le volume reste propre à
+chaque participant.
+
+### Mode clair / sombre
+
+Le bouton 🌙 / ☀️ de l'en-tête passe l'interface en mode sombre ou clair. À la
+première visite, elle suit la préférence du système ; ensuite, le choix est
+retenu. Les couleurs sont des variables CSS (`frontend/src/styles.css`).
+
 ### Langues : français et anglais
 
 L'interface existe en français et en anglais. À la première visite, elle suit
@@ -99,6 +113,40 @@ téléchargement n'est consommé. Après un rechargement de la page, le navigate
 demande de rechoisir le fichier (il ne peut pas le rouvrir seul), et le format
 doit être lisible par le navigateur (pas de conversion pour les fichiers
 locaux).
+
+### Partager en direct (P2P)
+
+La carte **« Partager en direct (P2P) »** diffuse un fichier de votre appareil
+directement vers les navigateurs des autres participants (WebRTC), sans
+l'envoyer au serveur ni au stockage : qualité d'origine, mise en mémoire
+tampon et déplacement comme pour un fichier en ligne, même lecteur et même
+synchronisation. Gratuit : la signalisation passe par Socket.IO, un serveur
+STUN public aide les navigateurs à se trouver. Limites : celui qui partage
+garde la page ouverte et envoie le fichier à chaque spectateur (son débit
+montant compte) ; sur les réseaux très stricts (entreprise, université,
+certains mobiles), la connexion directe échoue et le lecteur l'explique ;
+après un rechargement, il doit rechoisir son fichier. Vérifié entre deux
+Chromium, et de Firefox vers Chromium (vidéo 1080p de 48 Mo, saut lointain
+en 0,6 s).
+
+### Dossiers et téléchargement
+
+- **Synchroniser un dossier local** (sans rien envoyer) : dans la carte
+  « Synchroniser un fichier local », chaque participant choisit un dossier
+  **de même nom**. Les fichiers de **même nom** (même chemin dans le dossier)
+  et de **même durée** (1 s près) deviennent lisibles pour tout le monde ; les
+  fichiers que le salon n'a pas encore y sont ajoutés, ceux dont la durée
+  diffère sont signalés. Dans le lecteur, un fichier d'un dossier demande le
+  dossier de même nom, pas un fichier seul.
+- **Envoyer un dossier entier** : carte « Ajouter un média ». Les fichiers sont
+  envoyés un par un (conversion MOV/AVI/MKV comprise) et gardent le nom de
+  leur dossier. Un avertissement rappelle que tout part dans le stockage
+  gratuit partagé ; s'il est plein, l'envoi s'arrête avec un message.
+- **Télécharger** un média envoyé (bouton ⬇) : sous son nom d'origine. Avec
+  Backblaze B2, chaque téléchargement compte dans le quota gratuit de 1 Go par
+  jour.
+- **Pas de nombre maximal de médias par salon** : la seule limite est
+  l'espace du stockage gratuit.
 
 ### Formats acceptés
 

@@ -36,11 +36,11 @@ export function createLocalStorage({ directory, secret }) {
      * navigateur la place directement dans <audio src> : elle ne peut pas
      * porter d'en-tête Authorization, d'où le jeton signé dans l'URL.
      */
-    async signedUrl({ key, mediaId, mimeType, expiresInSeconds }) {
+    async signedUrl({ key, mediaId, mimeType, expiresInSeconds, downloadName }) {
       pathFor(key);
-      const token = jwt.sign({ typ: "media-url", mid: mediaId, key, mime: mimeType }, secret, {
-        expiresIn: expiresInSeconds,
-      });
+      // `dl` : téléchargement (pièce jointe nommée) au lieu de la lecture.
+      const payload = { typ: "media-url", mid: mediaId, key, mime: mimeType, ...(downloadName ? { dl: downloadName } : {}) };
+      const token = jwt.sign(payload, secret, { expiresIn: expiresInSeconds });
       return {
         url: `/api/media/${mediaId}/stream?token=${token}`,
         expiresAt: new Date(Date.now() + expiresInSeconds * 1000).toISOString(),
@@ -56,7 +56,7 @@ export function createLocalStorage({ directory, secret }) {
       if (payload.typ !== "media-url" || payload.mid !== mediaId) {
         throw new Error("Jeton de lecture émis pour un autre usage");
       }
-      return { filePath: pathFor(payload.key), mimeType: payload.mime };
+      return { filePath: pathFor(payload.key), mimeType: payload.mime, downloadName: payload.dl ?? null };
     },
 
     /** Supprime un fichier. Un fichier déjà absent n'est pas une erreur. */

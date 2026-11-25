@@ -127,6 +127,28 @@ export function attachRealtime(httpServer, { now = Date.now } = {}) {
       }
     });
 
+    /*
+     * Signalisation WebRTC du partage direct (P2P) : le serveur ne fait que
+     * relayer offre, réponse et candidats ICE vers un autre participant du
+     * même salon. Le fichier, lui, ne passe jamais par le serveur.
+     */
+    socket.on("p2p:signal", async (message) => {
+      try {
+        if (!stillAllowed()) return;
+        const to = message?.to;
+        const data = message?.data;
+        if (typeof to !== "string" || to === participant.id || data === undefined) return;
+        if (JSON.stringify(data).length > 64 * 1024) {
+          console.warn(`[p2p] Signal trop volumineux de ${participant.id}, ignoré`);
+          return;
+        }
+        const targets = (await io.in(roomId).fetchSockets()).filter((s) => s.data.participant?.id === to);
+        for (const target of targets) target.emit("p2p:signal", { from: participant.id, data });
+      } catch (error) {
+        console.error("[p2p] Erreur de relais de la signalisation", error);
+      }
+    });
+
     socket.on("buffer:start", () => {
       if (stillAllowed()) hub.sync.bufferStart(participant);
     });

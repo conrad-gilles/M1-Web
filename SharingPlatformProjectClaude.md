@@ -504,6 +504,9 @@ for demos of phases 3.1 to 3.3; if it becomes annoying, do phase 3.4 earlier.
 | Sync tolerance | **0.5 s** between participants. |
 | P2P file matching | **Very loose at first:** same duration and same file type only (§6). |
 | Interface language | **French and English** (November 2026): the browser's language on the first visit (English unless it is French), then the user's FR / EN choice, remembered. Runtime translation in the frontend; the backend keeps French messages, translated on display. |
+| Live P2P sharing | **WebRTC data channel + service worker, no TURN** (November 2026): free (STUN and the existing Socket.IO), original quality, real buffering and seeking. Accepted limits: strict networks cannot connect (clear message), the sharer keeps the page open and uploads once per viewer. |
+| Media per room | **No maximum** (November 2026; it used to be 20), for uploads and local entries alike. The free storage is the only limit: a full storage gives a clear `507`, and a folder upload warns beforehand that it uses the shared free storage. |
+| Local folder matching | **Same folder name, then same file path and same duration** (within 1 s). Files the room does not have yet are added; files with a different duration are reported, not synced. |
 | Local file matching (server version) | **Same duration only, within 1 s** (November 2026): name, size and format may differ. Local files are a separate option next to uploads, played by the same room player and synced over the same Socket.IO protocol. |
 | Accounts | **None, in both versions.** The host shares a simple room code; others join with it and a display name (§4). |
 | Seeking | **When one person seeks, everyone follows**, with a notice showing who did it (§5 rule 7). |
@@ -555,6 +558,10 @@ see below).
 | 3.5 (part) Video types: MP4, WebM, OGV accepted, `kind: "video"`, `<video>` player with full screen | `backend/src/config.js`, `components/media-library/`, `components/sync-player/` |
 | 3.7 (early) MOV/AVI/MKV converted to MP4 in the browser (`ffmpeg.wasm`, loaded only when needed) | `frontend/src/app/shared/video/`, `shared/services/video-converter.service.ts`, `frontend/angular.json` (assets) |
 | Local files synced without upload (a server-assisted step towards 3.6): `POST /api/media/local` stores only title, duration and type (`source: "local"`); the room player asks each participant for their own copy, accepted when its duration matches within 1 s, then plays it from a `blob:` URL with the usual sync | `backend/src/routes/mediaRoutes.js`, `backend/src/models/Media.js`, `components/local-media/`, `components/sync-player/`, `shared/local-media/`, `shared/services/local-files.service.ts`, `e2e/tests/local.spec.js` |
+| Live P2P sharing (server-assisted, a step towards 3.6/3.7): `POST /api/media/p2p` records who shares; WebRTC data channel between browsers, signaling relayed by Socket.IO (`p2p:signal`), Google STUN, no TURN; the viewer's `<video>` loads `/p2p-stream/…`, served by a service worker that turns Range requests into 4 MB byte requests to the sharer (64 KB chunks, backpressure). Same player and sync. Verified Chromium↔Chromium and Firefox→Chromium, 48 MB 1080p file | `frontend/src/app/shared/p2p/`, `frontend/public/p2p-sw.js`, `components/p2p-share/`, `backend/src/realtime.js`, `e2e/tests/p2p.spec.js` |
+| Folders and downloads: sync a local folder (same name; same path and duration per file), upload a whole folder (one file at a time, `folder` kept), download an uploaded media under its original name (`GET /media/:id/download`, B2 attachment). No media limit per room. Upload file names are now read as UTF-8 (accents were garbled) | `backend/src/routes/mediaRoutes.js`, `components/local-media/`, `components/media-library/`, `components/sync-player/`, `shared/local-media/local-folder.ts`, `e2e/tests/dossiers.spec.js`, `e2e/fixtures/dossiers/` |
+| Browser's native player controls (also in full screen): play, pause and seek from them, the keyboard or media keys drive the whole room; the player marks its own actions on the element so they are never sent back (no echo loop). Verified with real mouse clicks in Chromium and in Firefox full screen | `components/sync-player/`, `e2e/tests/natif.spec.js`, `Documentation/SYNC_PROTOCOL.md` |
+| Dark mode: colours as CSS variables with a light and a dark set (`data-theme` on `<html>`), 🌙/☀️ toggle in the header, system preference on the first visit, choice remembered; the Material snackbar follows | `frontend/src/styles.css`, `shared/theme/`, `components/app/`, `e2e/tests/theme.spec.js` |
 | French / English interface: `I18nService` (signal-based, `t('key')` in templates), dictionaries with a compile-time check that every French key has an English text, translation of the backend's French messages, FR / EN switch in the header | `frontend/src/app/shared/i18n/`, `components/app/`, `e2e/tests/langue.spec.js` |
 | End-to-end video tests and their clips | `e2e/tests/video.spec.js`, `e2e/fixtures/` |
 
@@ -571,8 +578,10 @@ Choices made while implementing, to review:
 - **One session per browser (`localStorage`):** every tab of a browser is the same participant, and
   the host keeps their rights after closing the tab. Leaving the room in one tab leaves it in all of
   them. To test alone with several participants, use a private window or another browser.
-- **The player has no native controls:** buttons send commands, the player only applies the shared
-  state, so echo loops cannot happen (§5 rule 4).
+- **The player shows the browser's native controls** (November 2026; at first it had none). Our
+  buttons and the native controls both send commands, the player only applies the shared state (§5
+  rule 4). Echo loops are avoided because the player marks its own play/pause/seek calls; any other
+  change counts as the user's, media keys included.
 - **Loading a media leaves it paused at 0 s**; anyone then presses play.
 - **During a buffering wait:** pause cancels the automatic resume, play resumes at once, seek keeps
   waiting (§5 rule 5 did not say).

@@ -37,7 +37,7 @@ function watchConverterDownload(page) {
 async function uploadVideo(page, file, title) {
   const card = uploadCard(page);
   await card.getByRole("textbox", { name: "Titre" }).fill(title);
-  await card.locator('input[type="file"]').setInputFiles(clip(file));
+  await card.locator('input[type="file"]:not([webkitdirectory])').setInputFiles(clip(file));
   await card.getByRole("button", { name: "Envoyer" }).click();
   // La conversion d'une vidéo réencodée peut prendre quelques secondes.
   await expect(page.locator(".media-card", { hasText: title })).toBeVisible({ timeout: 60_000 });

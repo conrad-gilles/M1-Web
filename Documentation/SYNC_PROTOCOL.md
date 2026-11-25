@@ -69,12 +69,14 @@ Quand aucun média n'est chargé, `playback` vaut `null`.
 | `clock:ping` | accusé de réception | `{ serverTime }` |
 | `playback:command` | une commande (ci-dessous) + accusé de réception | `{ ok: true }` ou `{ ok: false, message }` |
 | `buffer:start` | - | Le lecteur est bloqué depuis plus de 0,5 s. |
+| `p2p:signal` | `{ to, data }` | Partage direct : message de signalisation WebRTC (`data` : `{ sdp }` ou `{ candidate }`, 64 Ko au plus) pour le participant `to` du même salon. Le serveur le relaie tel quel en `p2p:signal` `{ from, data }` vers ce seul participant ; jamais vers un autre salon ni vers l'émetteur. |
 | `buffer:end` | - | Le lecteur peut de nouveau lire. |
 
 Commandes :
 
 | Commande | Effet |
 |---|---|
+| *(contrôles natifs)* | Le lecteur affiche les contrôles du navigateur (aussi en plein écran). Les navigateurs ne signalent pas les clics sur ces contrôles, seulement les événements `play`, `pause` et `seeked` : le lecteur marque chaque action qu'il fait lui-même (appliquer l'état, corriger la dérive) et traite toutes les autres comme des actions de l'utilisateur (contrôles natifs, clavier, touche multimédia, casque). 250 ms après la fin du geste, il envoie au salon `seek`, puis `play` ou `pause`, pour ce qui diffère de l'état partagé (un saut à moins de 0,5 s de la position du salon est ignoré). Pendant ce temps et jusqu'à la réponse (1 s au plus), il ne ramène pas le lecteur à l'ancien état. |
 | `{ type: "load", mediaId }` | Charge un média du salon, en pause à 0 s. Refusée (`Média inconnu`) si le média n'appartient pas au salon. Un média local (`source: "local"`) se charge de la même façon : le protocole ne change pas, chaque participant applique l'état à sa propre copie dès qu'il l'a choisie. Tant qu'il ne l'a pas choisie, il n'a pas de lecteur, ne signale aucun blocage et ne retient donc pas le salon ; il rejoint la position partagée en choisissant son fichier. |
 | `{ type: "play" }` | Lecture à partir de la position courante. |
 | `{ type: "pause" }` | Pause à la position attendue à l'heure du serveur. |
@@ -132,6 +134,20 @@ Commandes :
 9. **Arrivants tardifs.** `room:state` donne l'état courant dès la connexion.
 10. **Salon vide.** Quand plus personne n'est connecté, la lecture passe en pause
     à la position courante.
+
+## Partage direct (P2P)
+
+Un média `source: "p2p"` reste sur l'appareil de celui qui le partage
+(`owner`). Le spectateur ouvre une connexion WebRTC vers lui (offre, réponse
+et candidats ICE relayés par `p2p:signal` ; serveur STUN public de Google ;
+pas de TURN), puis un canal de données fiable et ordonné. Son lecteur charge
+`/p2p-stream/<média>?page=<page>` : le service worker `p2p-sw.js` transforme
+chaque requête Range en demande d'octets sur le canal (`info`, puis `range`
+de 4 Mo au plus, envoyée en morceaux de 64 Ko avec contre-pression) et répond
+`206 Partial Content`. La lecture, la mise en mémoire tampon, les sauts et
+la synchronisation sont ensuite ceux d'un fichier en ligne, en qualité
+d'origine. Sans connexion directe possible (réseau trop strict), après 15 s,
+le lecteur l'explique et propose de réessayer.
 
 ## Limites connues
 

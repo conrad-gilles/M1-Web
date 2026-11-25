@@ -9,6 +9,9 @@ import { VideoConverterService } from '../../shared/services/video-converter.ser
 import { formatDuration } from '../../shared/local-media/local-media';
 import { I18nService } from '../../shared/i18n/i18n.service';
 import { LocalMediaComponent } from '../local-media/local-media';
+import { P2pShareComponent } from '../p2p-share/p2p-share';
+import { readFolder } from '../../shared/local-media/local-folder';
+import { filter, firstValueFrom, tap } from 'rxjs';
 import {
   RECOMMENDED_CONVERSION_INPUT_SIZE,
   fileExtension,
@@ -51,7 +54,7 @@ const SNACKBAR_DURATION = 5000;
 /** Upload, paginated list and deletion of the media files of a room. */
 @Component({
   selector: 'app-media-library',
-  imports: [ReactiveFormsModule, LocalMediaComponent],
+  imports: [ReactiveFormsModule, LocalMediaComponent, P2pShareComponent],
   templateUrl: './media-library.html',
   styleUrl: './media-library.css',
 })
@@ -306,6 +309,118 @@ export class MediaLibraryComponent {
           status: 'error',
           message: this.extractErrorMessage(error, this.t('upload.failed')),
         });
+      },
+    });
+  }
+
+  // --- Envoi d'un dossier entier ------------------------------------------------
+
+  /** Dossier choisi pour l'envoi : fichiers acceptés, taille totale, fichiers ignorés. */
+  readonly folderPlan = signal<{ folder: string; files: File[]; size: number; skipped: string[] } | null>(null);
+  readonly folderProgress = signal<{ done: number; total: number; name: string } | null>(null);
+  readonly folderMessage = signal('');
+  readonly folderError = signal('');
+  private readonly folderInput = viewChild<ElementRef<HTMLInputElement>>('folderInput');
+
+  chooseUploadFolder(event: Event): void {
+    const chosen = readFolder(Array.from((event.target as HTMLInputElement).files ?? []));
+    this.folderMessage.set('');
+    this.folderError.set('');
+    if (!chosen) {
+      this.folderPlan.set(null);
+      return;
+    }
+    const files = chosen.files.filter((entry) => this.validateFile(entry.file) === null).map((entry) => entry.file);
+    const skipped = chosen.files.filter((entry) => this.validateFile(entry.file) !== null).map((entry) => entry.path);
+    this.folderPlan.set({
+      folder: chosen.folder,
+      files,
+      size: files.reduce((total, file) => total + file.size, 0),
+      skipped,
+    });
+  }
+
+  /**
+   * Envoie les fichiers du dossier un par un, comme des envois ordinaires
+   * (conversion MOV/AVI/MKV comprise), avec le nom du dossier. Pas de limite
+   * de nombre : si le stockage gratuit est plein (507), l'envoi s'arrête et
+   * le message du serveur explique pourquoi.
+   */
+  async uploadFolder(): Promise<void> {
+    const plan = this.folderPlan();
+    if (!plan || plan.files.length === 0 || this.busy()) return;
+    this.folderMessage.set('');
+    this.folderError.set('');
+    this.title.disable();
+
+    let done = 0;
+    try {
+      for (const file of plan.files) {
+        this.folderProgress.set({ done, total: plan.files.length, name: file.name });
+        let toSend = file;
+        if (needsConversion(file)) {
+          this.uploadState.set({ status: 'converting', percent: null });
+          toSend = await this.converter.toMp4(file, (percent) => this.uploadState.set({ status: 'converting', percent }));
+        }
+        await this.uploadOne(toSend, file.name, plan.folder);
+        done += 1;
+      }
+      this.folderMessage.set(this.t('upload.folderDone', { folder: plan.folder, count: done }));
+    } catch (error) {
+      console.error('[MediaLibrary] Envoi du dossier arrêté', error);
+      const reason =
+        error instanceof HttpErrorResponse
+          ? this.server(this.extractErrorMessage(error, this.t('upload.failed')))
+          : this.t('upload.conversionFailed');
+      this.folderError.set(this.t('upload.folderStopped', { done, reason }));
+    } finally {
+      this.folderProgress.set(null);
+      this.uploadState.set({ status: 'idle' });
+      this.title.enable();
+      this.folderPlan.set(null);
+      const input = this.folderInput()?.nativeElement;
+      if (input) input.value = '';
+      this.page.set(1);
+      this.load();
+    }
+  }
+
+  /** Un envoi, sous forme de promesse, avec la même barre de progression que l'envoi simple. */
+  private uploadOne(file: File, title: string, folder: string): Promise<unknown> {
+    this.uploadState.set({ status: 'uploading', percent: 0 });
+    return firstValueFrom(
+      this.service.upload(file, title, folder).pipe(
+        tap((event) => {
+          if (event.type === HttpEventType.UploadProgress) {
+            const percent = event.total ? Math.round((100 * event.loaded) / event.total) : null;
+            this.uploadState.set({ status: 'uploading', percent });
+          }
+        }),
+        filter((event) => event.type === HttpEventType.Response),
+      ),
+    );
+  }
+
+  // --- Téléchargement -------------------------------------------------------------
+
+  /**
+   * Télécharge un média envoyé sous son nom d'origine. Avec Backblaze B2,
+   * chaque téléchargement compte dans le quota gratuit de 1 Go par jour.
+   */
+  download(track: Media): void {
+    this.service.downloadUrl(track.id).subscribe({
+      next: ({ url }) => {
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = track.originalName.split('/').pop() || track.title;
+        link.rel = 'noopener';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      },
+      error: (error: HttpErrorResponse) => {
+        console.error('[MediaLibrary] Téléchargement impossible', error.status);
+        this.notify(this.extractErrorMessage(error, this.t('library.downloadFailed')));
       },
     });
   }

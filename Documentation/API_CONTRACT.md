@@ -25,8 +25,12 @@ propre copie.
 | POST | `/rooms/current/code` | jeton de salon + `X-Host-Token` | - | `200 Room` (nouveau code) |
 | DELETE | `/rooms/current` | jeton de salon + `X-Host-Token` | - | `204` |
 | GET | `/media?page=1&limit=5` | jeton de salon | - | `200 Page<Media>` |
-| POST | `/media` | jeton de salon | multipart : `file`, `title` | `201 Media` |
+| POST | `/media` | jeton de salon | multipart : `file`, `title`, `folder?` | `201 Media` |
 | POST | `/media/local` | jeton de salon | JSON : `{title, duration, kind, originalName?, mimeType?, size?}` | `201 Media` (`source: "local"`) |
+| POST | `/media/p2p` | jeton de salon | JSON : comme `/media/local` | `201 Media` (`source: "p2p"`, `owner` : le participant du jeton) |
+| POST | `/media/local-folder` | jeton de salon | JSON : `{folder, items: [{originalName, duration, kind, title?, mimeType?, size?}]}` | `201 Media[]` |
+| GET | `/media/folder?name=…` | jeton de salon | - | `200 Media[]` (médias du dossier, triés par chemin) |
+| GET | `/media/:id/download` | jeton de salon | - | `200 { url, expiresAt }` : URL de téléchargement (pièce jointe nommée) |
 | GET | `/media/:id/url` | jeton de salon | - | `200 MediaUrl` |
 | GET | `/media/:id/stream?token=…` | jeton de l'URL | en-tête `Range` facultatif | `200` ou `206`, octets du média |
 | DELETE | `/media/:id` | jeton de salon | - | `204` |
@@ -46,7 +50,14 @@ qu'à son propre salon et à ses médias.
   `X-Host-Token`.
 - `name` : nom d'affichage, 1 à 30 caractères après suppression des espaces
   autour.
-- `Media` : `{ id, source, duration, kind, title, originalName, mimeType, size, createdAt }`,
+- `Media` : `{ id, source, duration, folder, owner, kind, title, originalName, mimeType, size, createdAt }`,
+  `owner` : `{ id, name }` du participant qui partage un média `source: "p2p"`
+  (partage direct entre navigateurs, voir SYNC_PROTOCOL.md), sinon `null` ;
+  `/media/:id/url` renvoie `url: null` et `/media/:id/download` `409` pour un
+  média p2p,
+  `folder` : nom du dossier d'origine (envoi ou synchronisation d'un dossier),
+  ou `null` ; pour un dossier local, `originalName` est le chemin du fichier
+  dans ce dossier (`"Saison 1/ep01.mkv"`),
   avec `kind` égal à `"audio"` ou `"video"` et `source` égal à :
   - `"upload"` : fichier envoyé et stocké ; `duration` vaut `null` ;
   - `"local"` : rien n'est envoyé (`POST /media/local`). `duration` (secondes)
@@ -56,8 +67,19 @@ qu'à son propre salon et à ses médias.
     `size`, `originalName` et `mimeType` décrivent le fichier d'origine, à
     titre indicatif.
 - `POST /media/local` : `title` 1 à 200 caractères, `duration` nombre de
-  secondes strictement positif, `kind` `"audio"` ou `"video"`. Compte dans le
-  quota de 20 médias par salon.
+  secondes strictement positif, `kind` `"audio"` ou `"video"`.
+- `POST /media/local-folder` : `folder` 1 à 200 caractères, 1 à 1 000 fichiers
+  par requête, mêmes règles que `/media/local` pour chacun, `originalName`
+  (chemin dans le dossier) obligatoire. Tout est vérifié avant d'enregistrer
+  quoi que ce soit. Un autre participant relie son dossier de même nom : les
+  fichiers de même chemin et de même durée (1 s près) deviennent lisibles
+  pour lui ; il déclare les fichiers que le salon n'a pas encore.
+- `GET /media/:id/download` : comme `/media/:id/url`, mais le navigateur
+  enregistre le fichier sous son nom d'origine (`Content-Disposition:
+  attachment`). Avec B2, chaque téléchargement compte dans le quota gratuit
+  du jour (1 Go). `409` pour un média local (aucun fichier sur le serveur).
+- **Pas de nombre maximal de médias par salon** : la limite est l'espace du
+  stockage gratuit (`507` quand il est plein). Corps JSON : 1 Mo au plus.
 - `Page<Media>` : `{ items, page, limit, total, pages }`. `page` vaut au moins 1,
   `limit` est compris entre 1 et 20 (5 par défaut).
 - `MediaUrl` : `{ url, expiresAt, media }`. `url` est une URL temporaire limitée
@@ -88,7 +110,7 @@ qu'à son propre salon et à ses médias.
   refusé puis supprimé avec ses fichiers.
 - **Limites.** 10 participants par salon (quand le salon est plein, les
   participants entrés depuis plus de 2 minutes et non connectés au WebSocket
-  cèdent leur place), 20 médias par salon. Par adresse IP :
+  cèdent leur place), pas de nombre maximal de médias. Par adresse IP :
   10 codes erronés par tranche de 10 minutes, 10 créations de salon par heure.
 
 ## Lecture en streaming
@@ -118,11 +140,11 @@ Toutes les erreurs ont la forme `{ "message": "…" }`.
 
 | Statut | Cas |
 |---|---|
-| `400` | `Titre requis (200 caractères maximum)`, `Durée du média requise (nombre de secondes positif)`, `Type de média requis : audio ou video` (`POST /media/local`), `Corps JSON invalide`, `Nom d'affichage requis (30 caractères maximum)`, `Fichier requis`, `Format de média non accepté` |
+| `400` | `Titre requis (200 caractères maximum)`, `Durée du média requise (nombre de secondes positif)`, `Type de média requis : audio ou video` (`POST /media/local`), `Nom du dossier requis (200 caractères maximum)`, `Liste de fichiers requise (1000 au plus par envoi)`, `Chemin du fichier requis dans le dossier` (`POST /media/local-folder`, `GET /media/folder`), `Corps JSON invalide`, `Nom d'affichage requis (30 caractères maximum)`, `Fichier requis`, `Format de média non accepté` |
 | `401` | `Jeton de salon requis` (en-tête absent), `Salon fermé ou jeton invalide` (jeton falsifié ou expiré, salon fermé ou expiré, participant sorti), `Lien de lecture invalide ou expiré` (route `/stream`) |
 | `403` | `Action réservée à l'hôte du salon` (`X-Host-Token` absent ou faux) |
 | `404` | `Salon inconnu` (mauvais code à l'entrée), `Média inconnu` (inexistant, appartenant à un autre salon, ou identifiant invalide), `Ressource inconnue` (route `/api` inexistante) |
-| `409` | `Salon complet`, `Salon plein : 20 médias maximum` |
+| `409` | `Salon complet`, `Média local : aucun fichier à télécharger sur le serveur` |
 | `429` | `Trop de tentatives, réessayez plus tard` (codes erronés), `Trop de salons créés, réessayez plus tard` |
 | `507` | `Espace de stockage gratuit épuisé : supprimez des médias du salon ou réessayez plus tard.` (`POST /media` : disque plein, ou quota du stockage atteint) |
 | `500` | `Erreur interne du serveur` (erreur inattendue, détail dans les logs uniquement), `Métadonnée supprimée, mais fichier non supprimé` (`DELETE /media/:id`) |

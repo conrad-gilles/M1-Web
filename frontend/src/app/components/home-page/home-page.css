@@ -20,11 +20,11 @@
 }
 
 .message.error {
-  background: #fdecea;
-  color: #611a15;
+  background: var(--error-bg);
+  color: var(--error-fg);
 }
 
 .message.info {
-  background: #eef2ff;
-  color: #1e2a5c;
+  background: var(--info-bg);
+  color: var(--info-fg);
 }

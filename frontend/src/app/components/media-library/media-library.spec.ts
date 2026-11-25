@@ -11,6 +11,8 @@ const track = (id: string, title = `Morceau ${id}`): Media => ({
   id,
   source: 'upload',
   duration: null,
+  folder: null,
+  owner: null,
   kind: 'audio',
   title,
   originalName: `${id}.mp3`,
@@ -604,6 +606,108 @@ describe('MediaLibraryComponent', () => {
       expect(card.querySelector('.badge.local')?.textContent).toContain('Fichier local');
       expect(card.textContent?.replace(/\s+/g, ' ')).toContain('Vidéo · durée 1:30:23');
       expect(card.textContent).not.toContain('Go');
+    });
+
+    it('télécharge un média envoyé sous son nom d’origine ; pas de bouton pour un média local', () => {
+      create(page([track('a'), { ...track('loc'), source: 'local', duration: 60 }]));
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+      const cards = (fixture.nativeElement as HTMLElement).querySelectorAll('.media-card');
+
+      expect(cards[1].querySelector('button.download')).toBeNull();
+      const button = cards[0].querySelector<HTMLButtonElement>('button.download')!;
+      expect(button.title).toContain('quota gratuit de 1 Go de téléchargement par jour');
+      button.click();
+      http.expectOne('/api/media/a/download').flush({ url: '/api/media/a/stream?token=t', expiresAt: '' });
+
+      expect(click).toHaveBeenCalledTimes(1);
+      const link = click.mock.contexts[0] as HTMLAnchorElement;
+      expect(link.getAttribute('href')).toBe('/api/media/a/stream?token=t');
+      expect(link.download).toBe('a.mp3');
+      click.mockRestore();
+    });
+
+    it('affiche le dossier d’origine d’un média', () => {
+      create(page([{ ...track('a'), folder: 'Ma série' }]));
+
+      expect((fixture.nativeElement as HTMLElement).querySelector('.media-card .folder')?.textContent).toContain(
+        'Dossier « Ma série »',
+      );
+    });
+
+    describe('envoi d’un dossier entier', () => {
+      const inFolder = (relativePath: string, type: string, size = 1000) => {
+        const file = new File(['x'], relativePath.split('/').pop()!, { type });
+        Object.defineProperty(file, 'webkitRelativePath', { value: relativePath });
+        Object.defineProperty(file, 'size', { value: size });
+        return file;
+      };
+      const chooseFolder = (files: File[]) => {
+        component.chooseUploadFolder({ target: { files } } as unknown as Event);
+        fixture.detectChanges();
+      };
+      const postRequest = () => http.expectOne((req) => req.method === 'POST' && req.url === '/api/media');
+
+      it('avant l’envoi : avertissement sur le stockage gratuit partagé, fichiers ignorés listés', () => {
+        create();
+        chooseFolder([
+          inFolder('Musique/a.mp3', 'audio/mpeg', 3 * 1024 * 1024),
+          inFolder('Musique/b.mp3', 'audio/mpeg', 2 * 1024 * 1024),
+          inFolder('Musique/notes.wma', 'audio/x-ms-wma'),
+        ]);
+
+        const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+        expect(text).toContain('Dossier « Musique » : 2 fichier(s), 5.0 Mo.');
+        expect(text).toContain('stockage gratuit partagé par tous les salons (10 Go)');
+        expect(text).toContain('Ignorés (format non accepté) : notes.wma');
+      });
+
+      it('envoie les fichiers un par un avec le nom du dossier, puis recharge la liste', async () => {
+        create();
+        chooseFolder([inFolder('Musique/a.mp3', 'audio/mpeg'), inFolder('Musique/b.mp3', 'audio/mpeg')]);
+
+        const pending = component.uploadFolder();
+        for (const name of ['a.mp3', 'b.mp3']) {
+          const request = await vi.waitFor(() => postRequest());
+          const body = request.request.body as FormData;
+          expect((body.get('file') as File).name).toBe(name);
+          expect(body.get('folder')).toBe('Musique');
+          expect(body.get('title')).toBe(name);
+          request.flush({ ...track(name), folder: 'Musique' });
+        }
+        await pending;
+        expectList(1).flush(page([track('b.mp3'), track('a.mp3')]));
+        fixture.detectChanges();
+
+        expect((fixture.nativeElement as HTMLElement).textContent).toContain(
+          'Dossier « Musique » : 2 fichier(s) ajouté(s) au salon.',
+        );
+        expect(component.busy()).toBe(false);
+      });
+
+      it('stockage plein (507) : l’envoi s’arrête et explique pourquoi', async () => {
+        create();
+        chooseFolder([
+          inFolder('Musique/a.mp3', 'audio/mpeg'),
+          inFolder('Musique/b.mp3', 'audio/mpeg'),
+          inFolder('Musique/c.mp3', 'audio/mpeg'),
+        ]);
+
+        const pending = component.uploadFolder();
+        (await vi.waitFor(() => postRequest())).flush(track('a.mp3'));
+        (await vi.waitFor(() => postRequest())).flush(
+          { message: 'Espace de stockage gratuit épuisé : supprimez des médias du salon ou réessayez plus tard.' },
+          { status: 507, statusText: 'Insufficient Storage' },
+        );
+        await pending;
+        expectList(1).flush(page([track('a.mp3')]));
+        fixture.detectChanges();
+
+        http.expectNone((req) => req.method === 'POST');
+        expect((fixture.nativeElement as HTMLElement).querySelector('[role="alert"]')?.textContent).toContain(
+          'Envoi du dossier arrêté après 1 fichier(s) : Espace de stockage gratuit épuisé',
+        );
+        expect(component.title.enabled).toBe(true);
+      });
     });
 
     it('formate tailles, dates et types pour l’affichage', () => {

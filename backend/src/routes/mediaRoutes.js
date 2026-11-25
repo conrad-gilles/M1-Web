@@ -2,12 +2,48 @@ import { Router } from "express";
 import fsPromises from "node:fs/promises";
 import mongoose from "mongoose";
 import { roomEvents } from "../events.js";
-import { ALLOWED_MIME_TYPES, MAX_MEDIA_PER_ROOM, MEDIA_URL_TTL_SECONDS } from "../config.js";
+import { ALLOWED_MIME_TYPES, MAX_FOLDER_FILES_PER_REQUEST, MEDIA_URL_TTL_SECONDS } from "../config.js";
 import { roomAuth } from "../middleware/roomAuth.js";
 import { upload } from "../middleware/upload.js";
 import { Media } from "../models/Media.js";
+import { attachmentHeader } from "../storage/s3Storage.js";
 
 const UNKNOWN_MEDIA = "Média inconnu";
+
+/** Nom de dossier nettoyé (1 à 200 caractères), ou null. */
+function folderName(value) {
+  if (typeof value !== "string") return null;
+  const name = value.trim();
+  return name && name.length <= 200 ? name : null;
+}
+
+/**
+ * Vérifie un média local (déclaré seul ou dans un dossier) et renvoie
+ * `{ value }` prêt pour Media.create, ou `{ error }`.
+ */
+function localMedia(body) {
+  const { title, duration, kind, originalName, mimeType, size } = body ?? {};
+  if (typeof title !== "string" || !title.trim() || title.trim().length > 200) {
+    return { error: "Titre requis (200 caractères maximum)" };
+  }
+  if (typeof duration !== "number" || !Number.isFinite(duration) || duration <= 0) {
+    return { error: "Durée du média requise (nombre de secondes positif)" };
+  }
+  if (kind !== "audio" && kind !== "video") {
+    return { error: "Type de média requis : audio ou video" };
+  }
+  return {
+    value: {
+      source: "local",
+      kind,
+      title: title.trim(),
+      duration,
+      originalName: typeof originalName === "string" ? originalName.slice(0, 500) : "",
+      mimeType: typeof mimeType === "string" ? mimeType.slice(0, 100) : "",
+      size: Number.isFinite(size) && size >= 0 ? size : 0,
+    },
+  };
+}
 
 /** Refuse tôt un identifiant qui n'est pas un ObjectId MongoDB. */
 function validId(req, res, next) {
@@ -62,12 +98,14 @@ export function mediaRoutes({ storage }) {
       ]);
 
       // L'identifiant MongoDB (_id) devient `id`, plus simple côté frontend.
-      const publicItems = items.map(({ _id, __v, updatedAt, storageKey, roomId, ...media }) => ({
+      const publicItems = items.map(({ _id, __v, updatedAt, storageKey, roomId, ownerId, ownerName, ...media }) => ({
         id: String(_id),
         ...media,
         // Médias créés avant l'option « fichier local » : ce sont des uploads.
         source: media.source ?? "upload",
         duration: media.duration ?? null,
+        folder: media.folder ?? null,
+        owner: media.source === "p2p" ? { id: ownerId, name: ownerName } : null,
       }));
 
       console.log(`[media] ${publicItems.length} média(s) envoyé(s) sur ${total}`);
@@ -84,21 +122,17 @@ export function mediaRoutes({ storage }) {
     }
   });
 
-  /** Reçoit le champ multipart `file` et le champ texte `title`. */
+  /**
+   * Reçoit le champ multipart `file`, et les champs texte `title` et `folder`
+   * (dossier d'origine, pour l'envoi d'un dossier entier, un fichier par requête).
+   * Pas de nombre maximal de médias : un stockage plein donne une erreur 507.
+   */
   router.post("/", roomAuth, upload.single("file"), async (req, res, next) => {
     let stored = false;
     try {
       if (!req.file) {
         console.warn(`[media] Upload sans fichier dans le salon ${req.room.id}`);
         return res.status(400).json({ message: "Fichier requis" });
-      }
-
-      if ((await Media.countDocuments({ roomId: req.room.id })) >= MAX_MEDIA_PER_ROOM) {
-        console.warn(`[media] Quota atteint dans le salon ${req.room.id}`);
-        await discardTempFile(req.file);
-        return res.status(409).json({
-          message: `Salon plein : ${MAX_MEDIA_PER_ROOM} médias maximum`,
-        });
       }
 
       const key = req.file.filename;
@@ -110,6 +144,7 @@ export function mediaRoutes({ storage }) {
         kind: ALLOWED_MIME_TYPES.get(req.file.mimetype),
         title: req.body.title || req.file.originalname,
         originalName: req.file.originalname,
+        folder: folderName(req.body.folder),
         storageKey: key,
         mimeType: req.file.mimetype,
         size: req.file.size,
@@ -143,42 +178,133 @@ export function mediaRoutes({ storage }) {
    */
   router.post("/local", roomAuth, async (req, res, next) => {
     try {
-      const { title, duration, kind, originalName, mimeType, size } = req.body ?? {};
-      const invalid = (message) => {
-        console.warn(`[media] Média local refusé dans le salon ${req.room.id} : ${message}`);
-        return res.status(400).json({ message });
-      };
-
-      if (typeof title !== "string" || !title.trim() || title.trim().length > 200) {
-        return invalid("Titre requis (200 caractères maximum)");
-      }
-      if (typeof duration !== "number" || !Number.isFinite(duration) || duration <= 0) {
-        return invalid("Durée du média requise (nombre de secondes positif)");
-      }
-      if (kind !== "audio" && kind !== "video") {
-        return invalid("Type de média requis : audio ou video");
-      }
-      if ((await Media.countDocuments({ roomId: req.room.id })) >= MAX_MEDIA_PER_ROOM) {
-        console.warn(`[media] Quota atteint dans le salon ${req.room.id}`);
-        return res.status(409).json({ message: `Salon plein : ${MAX_MEDIA_PER_ROOM} médias maximum` });
+      const checked = localMedia(req.body);
+      if (checked.error) {
+        console.warn(`[media] Média local refusé dans le salon ${req.room.id} : ${checked.error}`);
+        return res.status(400).json({ message: checked.error });
       }
 
-      const media = await Media.create({
-        roomId: req.room.id,
-        source: "local",
-        kind,
-        title: title.trim(),
-        duration,
-        originalName: typeof originalName === "string" ? originalName.slice(0, 255) : "",
-        mimeType: typeof mimeType === "string" ? mimeType.slice(0, 100) : "",
-        size: Number.isFinite(size) && size >= 0 ? size : 0,
-      });
+      const media = await Media.create({ roomId: req.room.id, ...checked.value });
 
-      console.log(`[media] Média local déclaré : ${media.id} (${duration.toFixed(1)} s)`);
+      console.log(`[media] Média local déclaré : ${media.id} (${media.duration.toFixed(1)} s)`);
       roomEvents.emit("media:changed", req.room.id);
       res.status(201).json(media.toPublic());
     } catch (error) {
       console.error("[media] Erreur pendant la déclaration du média local", error);
+      next(error);
+    }
+  });
+
+  /**
+   * Partage en direct (P2P) : le fichier reste sur l'appareil du participant
+   * qui le partage et part directement vers les autres navigateurs (WebRTC,
+   * signalisation par Socket.IO, voir SYNC_PROTOCOL.md). Le serveur ne garde
+   * que les métadonnées et qui partage. Corps JSON : comme /local.
+   */
+  router.post("/p2p", roomAuth, async (req, res, next) => {
+    try {
+      const checked = localMedia(req.body);
+      if (checked.error) {
+        console.warn(`[media] Partage direct refusé dans le salon ${req.room.id} : ${checked.error}`);
+        return res.status(400).json({ message: checked.error });
+      }
+      const media = await Media.create({
+        roomId: req.room.id,
+        ...checked.value,
+        source: "p2p",
+        ownerId: req.participant.id,
+        ownerName: req.participant.name,
+      });
+      console.log(`[media] Partage direct déclaré : ${media.id} par ${req.participant.id}`);
+      roomEvents.emit("media:changed", req.room.id);
+      res.status(201).json(media.toPublic());
+    } catch (error) {
+      console.error("[media] Erreur pendant la déclaration du partage direct", error);
+      next(error);
+    }
+  });
+
+  /**
+   * Déclare les fichiers d'un dossier local (rien n'est envoyé). Corps JSON :
+   * { folder, items: [{ title?, originalName, duration, kind, mimeType?, size? }] }
+   * où `originalName` est le chemin du fichier dans le dossier. Un autre
+   * participant y accède en choisissant un dossier de même nom : chaque
+   * fichier de même chemin et de même durée devient lisible pour lui.
+   */
+  router.post("/local-folder", roomAuth, async (req, res, next) => {
+    try {
+      const folder = folderName(req.body?.folder);
+      const items = req.body?.items;
+      const invalid = (message) => {
+        console.warn(`[media] Dossier local refusé dans le salon ${req.room.id} : ${message}`);
+        return res.status(400).json({ message });
+      };
+      if (!folder) return invalid("Nom du dossier requis (200 caractères maximum)");
+      if (!Array.isArray(items) || items.length === 0 || items.length > MAX_FOLDER_FILES_PER_REQUEST) {
+        return invalid(`Liste de fichiers requise (${MAX_FOLDER_FILES_PER_REQUEST} au plus par envoi)`);
+      }
+
+      const documents = [];
+      for (const item of items) {
+        // Titre par défaut : le nom du fichier (sans le chemin dans le dossier).
+        const title = item?.title || String(item?.originalName ?? "").split("/").pop();
+        const checked = localMedia({ ...item, title });
+        if (checked.error) return invalid(`${item?.originalName ?? "?"} : ${checked.error}`);
+        if (!checked.value.originalName) return invalid("Chemin du fichier requis dans le dossier");
+        documents.push({ roomId: req.room.id, ...checked.value, folder });
+      }
+
+      const created = await Media.insertMany(documents);
+      console.log(`[media] Dossier local « ${folder} » déclaré : ${created.length} fichier(s)`);
+      roomEvents.emit("media:changed", req.room.id);
+      res.status(201).json(created.map((media) => media.toPublic()));
+    } catch (error) {
+      console.error("[media] Erreur pendant la déclaration du dossier local", error);
+      next(error);
+    }
+  });
+
+  /** Tous les médias d'un dossier du salon (pour qu'un participant y relie le sien). */
+  router.get("/folder", roomAuth, async (req, res, next) => {
+    try {
+      const folder = folderName(req.query.name);
+      if (!folder) return res.status(400).json({ message: "Nom du dossier requis (200 caractères maximum)" });
+      const items = await Media.find({ roomId: req.room.id, folder }).sort({ originalName: 1 });
+      res.json(items.map((media) => media.toPublic()));
+    } catch (error) {
+      console.error("[media] Erreur de lecture du dossier", error);
+      next(error);
+    }
+  });
+
+  /**
+   * URL de téléchargement d'un média envoyé : même URL temporaire que la
+   * lecture, mais le navigateur enregistre le fichier sous son nom d'origine.
+   * Avec Backblaze B2, chaque téléchargement compte dans le quota gratuit du
+   * jour (1 Go). Un média local n'a pas de fichier sur le serveur (409).
+   */
+  router.get("/:id/download", roomAuth, validId, async (req, res, next) => {
+    try {
+      const media = await Media.findOne({ _id: req.params.id, roomId: req.room.id }).select("+storageKey");
+      if (!media) return res.status(404).json({ message: UNKNOWN_MEDIA });
+      if (media.source === "local") {
+        return res.status(409).json({ message: "Média local : aucun fichier à télécharger sur le serveur" });
+      }
+      if (media.source === "p2p") {
+        return res.status(409).json({ message: "Média partagé en direct : aucun fichier à télécharger sur le serveur" });
+      }
+
+      const signed = await storage.signedUrl({
+        key: media.storageKey,
+        mediaId: media.id,
+        mimeType: media.mimeType,
+        expiresInSeconds: MEDIA_URL_TTL_SECONDS,
+        downloadName: media.originalName.split("/").pop() || "media",
+      });
+      console.log(`[media] URL de téléchargement émise pour ${media.id}`);
+      res.json(signed);
+    } catch (error) {
+      console.error("[media] Erreur de préparation du téléchargement", error);
       next(error);
     }
   });
@@ -200,9 +326,10 @@ export function mediaRoutes({ storage }) {
         return res.status(404).json({ message: UNKNOWN_MEDIA });
       }
 
-      // Média local : pas de fichier sur le serveur, le lecteur demandera à
-      // chaque participant de choisir sa propre copie.
-      if (media.source === "local") {
+      // Média local ou partagé en direct : pas de fichier sur le serveur. Le
+      // lecteur demande sa copie à chacun (local) ou la reçoit du participant
+      // qui la partage (p2p, WebRTC).
+      if (media.source === "local" || media.source === "p2p") {
         return res.json({ url: null, expiresAt: null, media: media.toPublic() });
       }
 
@@ -238,6 +365,8 @@ export function mediaRoutes({ storage }) {
       return res.status(401).json({ message: "Lien de lecture invalide ou expiré" });
     }
 
+    // URL de téléchargement : le navigateur enregistre le fichier sous son nom d'origine.
+    if (file.downloadName) res.set("Content-Disposition", attachmentHeader(file.downloadName));
     res.type(file.mimeType);
     res.sendFile(file.filePath, { cacheControl: false }, (error) => {
       if (!error) return;

@@ -79,6 +79,15 @@ export class SyncService {
   /** Le salon n'est plus accessible : fermé, expiré ou quitté. */
   readonly roomClosed$ = this.roomClosedSubject.asObservable();
 
+  private readonly signalSubject = new Subject<{ from: string; data: unknown }>();
+  /** Signalisation WebRTC du partage direct, relayée par le serveur (voir P2pService). */
+  readonly signals$ = this.signalSubject.asObservable();
+
+  /** Envoie un message de signalisation WebRTC à un autre participant du salon. */
+  sendSignal(to: string, data: unknown): void {
+    this.socket?.emit('p2p:signal', { to, data });
+  }
+
   /** Heure du serveur estimée, en ms. */
   serverNow(): number {
     return Date.now() + this.clockOffset();
@@ -110,6 +119,7 @@ export class SyncService {
     socket.on('playback:state', (change: PlaybackChange) => this.applyChange(change));
     socket.on('room:participants', (participants: Participant[]) => this.participants.set(participants));
     socket.on('media:changed', () => this.mediaChangedSubject.next());
+    socket.on('p2p:signal', (message: { from: string; data: unknown }) => this.signalSubject.next(message));
     socket.on('room:updated', (room: Room) => this.roomUpdatedSubject.next(room));
     socket.on('room:closed', (event?: { reason?: RoomClosedReason }) =>
       this.roomClosedSubject.next(event?.reason ?? 'closed'),

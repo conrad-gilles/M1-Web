@@ -3,7 +3,9 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { I18nService } from '../../shared/i18n/i18n.service';
 import { Media } from '../../shared/models/media.model';
+import { firstValueFrom } from 'rxjs';
 import { LocalFileInfo, formatDuration } from '../../shared/local-media/local-media';
+import { ProbedFile, matchFolder, readFolder } from '../../shared/local-media/local-folder';
 import { LocalFilesService } from '../../shared/services/local-files.service';
 import { MediaService } from '../../shared/services/media.service';
 
@@ -39,6 +41,95 @@ export class LocalMediaComponent {
   private readonly fileInput = viewChild<ElementRef<HTMLInputElement>>('localInput');
 
   formatDuration = formatDuration;
+
+  // --- Dossier local ----------------------------------------------------------
+  readonly folderBusy = signal(false);
+  readonly folderProgress = signal<{ done: number; total: number } | null>(null);
+  readonly folderResult = signal('');
+  readonly folderProblems = signal<string[]>([]);
+  readonly folderError = signal('');
+
+  /**
+   * Flux : dossier choisi -> durée de chaque fichier lue dans le navigateur ->
+   * GET /api/media/folder (médias du salon dans un dossier de même nom) ->
+   * mêmes chemin et durée : reliés à ce participant ; inconnus du salon :
+   * déclarés (POST /api/media/local-folder) ; durée différente : signalés.
+   * Aucun fichier n'est envoyé.
+   */
+  async chooseFolder(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const chosen = readFolder(Array.from(input.files ?? []));
+    this.folderResult.set('');
+    this.folderProblems.set([]);
+    this.folderError.set('');
+    if (!chosen) return;
+    if (chosen.files.length === 0) {
+      this.folderError.set(this.t('local.folderEmpty'));
+      input.value = '';
+      return;
+    }
+
+    this.folderBusy.set(true);
+    try {
+      const probed: ProbedFile[] = [];
+      const unreadable: string[] = [];
+      this.folderProgress.set({ done: 0, total: chosen.files.length });
+      for (const entry of chosen.files) {
+        try {
+          probed.push({ ...entry, info: await this.localFiles.probe(entry.file) });
+        } catch {
+          unreadable.push(entry.path);
+        }
+        this.folderProgress.set({ done: probed.length + unreadable.length, total: chosen.files.length });
+      }
+
+      const room = await firstValueFrom(this.media.folder(chosen.folder));
+      const match = matchFolder(room, probed);
+      this.localFiles.rememberFolder(chosen.folder, chosen.files);
+      for (const { media, file } of match.linked) this.localFiles.remember(media.id, file);
+
+      let added: Media[] = [];
+      if (match.added.length > 0) {
+        added = await firstValueFrom(
+          this.media.declareLocalFolder(
+            chosen.folder,
+            match.added.map((file) => ({
+              originalName: file.path,
+              duration: file.info.duration,
+              kind: file.info.kind,
+              mimeType: file.file.type,
+              size: file.file.size,
+            })),
+          ),
+        );
+        const byPath = new Map(match.added.map((file) => [file.path, file]));
+        for (const media of added) {
+          const file = byPath.get(media.originalName);
+          if (file) this.localFiles.remember(media.id, file);
+        }
+      }
+
+      console.debug('[LocalMedia] Dossier synchronisé', chosen.folder, match);
+      this.folderResult.set(
+        this.t('local.folderDone', { folder: chosen.folder, linked: match.linked.length, added: added.length }),
+      );
+      const problems: string[] = [];
+      if (match.mismatched.length > 0) {
+        problems.push(this.t('local.folderMismatch', { files: match.mismatched.map((m) => m.file.path).join(', ') }));
+      }
+      if (unreadable.length > 0) problems.push(this.t('local.folderUnreadable', { files: unreadable.join(', ') }));
+      this.folderProblems.set(problems);
+      if (added.length > 0) this.declared.emit(added[0]);
+    } catch (error) {
+      console.error('[LocalMedia] Dossier impossible à synchroniser', error);
+      const message: unknown = error instanceof HttpErrorResponse ? error.error?.message : null;
+      this.folderError.set(typeof message === 'string' ? message : this.t('local.folderFailed'));
+    } finally {
+      this.folderBusy.set(false);
+      this.folderProgress.set(null);
+      input.value = '';
+    }
+  }
 
   /** Le navigateur lit la durée du fichier, sans rien envoyer. */
   async choose(event: Event): Promise<void> {

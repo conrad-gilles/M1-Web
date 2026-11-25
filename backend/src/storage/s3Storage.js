@@ -16,6 +16,15 @@ const KEY_PATTERN = /^[0-9a-f-]{36}(\.[a-z0-9]{1,8})?$/;
 // Une URL présignée S3 ne peut pas durer plus de 7 jours.
 const MAX_PRESIGN_SECONDS = 7 * 24 * 60 * 60;
 
+/**
+ * En-tête Content-Disposition d'un téléchargement : nom ASCII de secours,
+ * puis le vrai nom encodé (RFC 6266), accents compris.
+ */
+export function attachmentHeader(name) {
+  const fallback = name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+}
+
 function checkKey(key) {
   if (!KEY_PATTERN.test(String(key))) throw new Error("Clé de stockage invalide");
 }
@@ -88,12 +97,18 @@ export function createS3Storage({
     },
 
     /** URL de lecture présignée, limitée à ce fichier et à une durée (7 jours au plus). */
-    async signedUrl({ key, mimeType, expiresInSeconds }) {
+    async signedUrl({ key, mimeType, expiresInSeconds, downloadName }) {
       checkKey(key);
       const expiresIn = Math.min(expiresInSeconds, MAX_PRESIGN_SECONDS);
       const url = await presign(
         client,
-        new GetObjectCommand({ Bucket: bucket, Key: key, ResponseContentType: mimeType }),
+        new GetObjectCommand({
+          Bucket: bucket,
+          Key: key,
+          ResponseContentType: mimeType,
+          // Téléchargement : le navigateur enregistre le fichier sous son nom d'origine.
+          ...(downloadName ? { ResponseContentDisposition: attachmentHeader(downloadName) } : {}),
+        }),
         { expiresIn },
       );
       return { url, expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString() };

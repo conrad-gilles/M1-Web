@@ -12,6 +12,17 @@
       <button type="button" [attr.aria-pressed]="language() === 'fr'" (click)="i18n.use('fr')" lang="fr">FR</button>
       <button type="button" [attr.aria-pressed]="language() === 'en'" (click)="i18n.use('en')" lang="en">EN</button>
     </span>
+    <!-- Mode clair / sombre : le bouton propose l'autre mode. -->
+    <button
+      type="button"
+      class="theme-toggle"
+      (click)="theme.toggle()"
+      [attr.aria-pressed]="theme.theme() === 'dark'"
+      [attr.aria-label]="t('app.darkMode')"
+      [attr.title]="theme.theme() === 'dark' ? t('app.toLight') : t('app.toDark')"
+    >
+      {{ theme.theme() === 'dark' ? '☀️' : '🌙' }}
+    </button>
   </nav>
 </header>
 

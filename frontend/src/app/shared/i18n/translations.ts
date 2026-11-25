@@ -10,6 +10,9 @@ export const FR = {
   'app.home': 'Accueil',
   'app.room': 'Salon {code}',
   'app.language': 'Langue',
+  'app.darkMode': 'Mode sombre',
+  'app.toDark': 'Passer en mode sombre',
+  'app.toLight': 'Passer en mode clair',
 
   // --- Accueil --------------------------------------------------------------
   'home.title': 'Le même média, au même instant',
@@ -171,6 +174,56 @@ export const FR = {
   'library.deleteFailed': 'Impossible de supprimer ce média.',
   'size.bytes': '{n} o',
   'size.units': 'Ko,Mo,Go',
+
+  // --- Dossiers ---------------------------------------------------------------
+  'local.folderTitle': 'Ou un dossier entier',
+  'local.folderHint':
+    'Chaque participant choisit un dossier de même nom : les fichiers de même nom et de même durée deviennent lisibles pour tout le monde. Rien n\'est envoyé.',
+  'local.folderInput': 'Dossier sur votre appareil',
+  'local.folderReading': 'Lecture des durées : {done} / {total}…',
+  'local.folderEmpty': 'Ce dossier ne contient aucun fichier audio ou vidéo.',
+  'local.folderDone': 'Dossier « {folder} » : {linked} fichier(s) relié(s) au salon, {added} ajouté(s).',
+  'local.folderMismatch': 'Durée différente de celle du salon, non synchronisés : {files}',
+  'local.folderUnreadable': 'Illisibles par ce navigateur : {files}',
+  'local.folderFailed': 'Impossible d’ajouter ce dossier au salon.',
+  'player.folderPick':
+    'Fichier « {path} » du dossier « {folder} » (durée {duration}). Choisissez votre dossier de même nom : le fichier doit y avoir le même nom et la même durée. Rien n\'est envoyé.',
+  'player.folderInput': 'Votre dossier « {folder} »',
+  'player.folderWrongName': 'Ce dossier s’appelle « {actual} », celui du salon « {expected} ». Choisissez un dossier de même nom.',
+  'player.folderMissing': 'Votre dossier « {folder} » ne contient pas « {path} ».',
+  'library.folder': 'Dossier « {folder} »',
+  'library.download': 'Télécharger',
+  'library.downloadTitle': 'Télécharger {title} (compte dans le quota gratuit de 1 Go de téléchargement par jour)',
+  'library.downloadFailed': 'Téléchargement impossible.',
+  'upload.folder': 'Ou envoyer un dossier entier',
+  'upload.folderWarning':
+    'Dossier « {folder} » : {count} fichier(s), {size}. Tout part dans le stockage gratuit partagé par tous les salons (10 Go) ; s’il est plein, l’envoi s’arrête avec un message.',
+  'upload.sendFolder': 'Envoyer le dossier',
+  'upload.folderProgress': 'Fichier {done} / {total} : {name}',
+  'upload.folderDone': 'Dossier « {folder} » : {count} fichier(s) ajouté(s) au salon.',
+  'upload.folderStopped': 'Envoi du dossier arrêté après {done} fichier(s) : {reason}',
+  'upload.folderSkipped': 'Ignorés (format non accepté) : {files}',
+
+  // --- Partage direct (P2P) ------------------------------------------------------
+  'p2p.title': 'Partager en direct (P2P)',
+  'p2p.hint':
+    'Le fichier reste sur votre appareil et part directement vers les navigateurs des autres participants, en qualité d\'origine. Gardez cette page ouverte pendant la lecture.',
+  'p2p.warning':
+    'Utilise votre débit d’envoi pour chaque spectateur. Sur certains réseaux (entreprise, université, certains mobiles), la connexion directe est impossible.',
+  'p2p.file': 'Fichier à partager',
+  'p2p.add': 'Partager',
+  'p2p.adding': 'Partage…',
+  'p2p.success': '« {title} » est partagé en direct depuis votre appareil.',
+  'p2p.failed': 'Impossible de partager ce fichier.',
+  'library.p2pBadge': 'Partagé en direct par {name}',
+  'player.p2pConnecting': 'Connexion directe à {name}…',
+  'player.p2pOffline': '{name} n’est pas connecté : le fichier qu’il partage n’est pas disponible.',
+  'player.p2pFailed':
+    'Connexion directe impossible avec {name} (réseau trop strict ?). Il peut envoyer le fichier, ou chacun peut utiliser sa propre copie.',
+  'player.p2pNotShared': '{name} ne partage plus ce fichier (page rechargée ?) : il doit le choisir de nouveau.',
+  'player.p2pInterrupted': 'Le transfert depuis {name} s’est interrompu.',
+  'player.p2pReshare':
+    'Vous partagez « {title} » : choisissez de nouveau ce fichier pour que les autres puissent le lire (le navigateur l’oublie au rechargement).',
 } as const;
 
 export type TranslationKey = keyof typeof FR;
@@ -181,6 +234,9 @@ export const EN: Record<TranslationKey, string> = {
   'app.home': 'Home',
   'app.room': 'Room {code}',
   'app.language': 'Language',
+  'app.darkMode': 'Dark mode',
+  'app.toDark': 'Switch to dark mode',
+  'app.toLight': 'Switch to light mode',
 
   'home.title': 'The same media, at the same moment',
   'home.lead': 'Create a room, share its code: everyone follows the same playback. No account.',
@@ -333,6 +389,54 @@ export const EN: Record<TranslationKey, string> = {
   'library.deleteFailed': 'Could not delete this media.',
   'size.bytes': '{n} B',
   'size.units': 'KB,MB,GB',
+
+  'local.folderTitle': 'Or a whole folder',
+  'local.folderHint':
+    'Every participant picks a folder with the same name: files with the same name and the same duration become playable for everyone. Nothing is uploaded.',
+  'local.folderInput': 'Folder on your device',
+  'local.folderReading': 'Reading durations: {done} / {total}…',
+  'local.folderEmpty': 'This folder contains no audio or video file.',
+  'local.folderDone': 'Folder “{folder}”: {linked} file(s) linked to the room, {added} added.',
+  'local.folderMismatch': 'Duration differs from the room’s, not synced: {files}',
+  'local.folderUnreadable': 'Unreadable by this browser: {files}',
+  'local.folderFailed': 'Could not add this folder to the room.',
+  'player.folderPick':
+    'File “{path}” of folder “{folder}” (duration {duration}). Choose your folder with the same name: the file must have the same name and the same duration there. Nothing is uploaded.',
+  'player.folderInput': 'Your folder “{folder}”',
+  'player.folderWrongName': 'This folder is called “{actual}”, the room’s one “{expected}”. Choose a folder with the same name.',
+  'player.folderMissing': 'Your folder “{folder}” does not contain “{path}”.',
+  'library.folder': 'Folder “{folder}”',
+  'library.download': 'Download',
+  'library.downloadTitle': 'Download {title} (counts against the free quota of 1 GB of downloads per day)',
+  'library.downloadFailed': 'Download failed.',
+  'upload.folder': 'Or upload a whole folder',
+  'upload.folderWarning':
+    'Folder “{folder}”: {count} file(s), {size}. Everything goes to the free storage shared by all rooms (10 GB); if it is full, the upload stops with a message.',
+  'upload.sendFolder': 'Upload the folder',
+  'upload.folderProgress': 'File {done} / {total}: {name}',
+  'upload.folderDone': 'Folder “{folder}”: {count} file(s) added to the room.',
+  'upload.folderStopped': 'Folder upload stopped after {done} file(s): {reason}',
+  'upload.folderSkipped': 'Skipped (format not accepted): {files}',
+
+  'p2p.title': 'Share live (P2P)',
+  'p2p.hint':
+    'The file stays on your device and goes directly to the other participants’ browsers, in original quality. Keep this page open during playback.',
+  'p2p.warning':
+    'Uses your upload bandwidth for each viewer. On some networks (company, university, some mobile networks), a direct connection is impossible.',
+  'p2p.file': 'File to share',
+  'p2p.add': 'Share',
+  'p2p.adding': 'Sharing…',
+  'p2p.success': '“{title}” is shared live from your device.',
+  'p2p.failed': 'Could not share this file.',
+  'library.p2pBadge': 'Shared live by {name}',
+  'player.p2pConnecting': 'Connecting directly to {name}…',
+  'player.p2pOffline': '{name} is not connected: the file they share is not available.',
+  'player.p2pFailed':
+    'Direct connection to {name} is impossible (network too strict?). They can upload the file, or everyone can use their own copy.',
+  'player.p2pNotShared': '{name} no longer shares this file (page reloaded?): they need to pick it again.',
+  'player.p2pInterrupted': 'The transfer from {name} was interrupted.',
+  'player.p2pReshare':
+    'You share “{title}”: pick this file again so the others can play it (the browser forgets it on reload).',
 };
 
 /**
@@ -365,4 +469,10 @@ export const SERVER_MESSAGES_EN: Record<string, string> = {
   'Titre requis (200 caractères maximum)': 'Title required (200 characters at most)',
   'Durée du média requise (nombre de secondes positif)': 'Media duration required (positive number of seconds)',
   'Type de média requis : audio ou video': 'Media type required: audio or video',
+  'Nom du dossier requis (200 caractères maximum)': 'Folder name required (200 characters at most)',
+  'Liste de fichiers requise (1000 au plus par envoi)': 'File list required (1000 at most per request)',
+  'Chemin du fichier requis dans le dossier': 'File path inside the folder required',
+  'Média local : aucun fichier à télécharger sur le serveur': 'Local media: there is no file to download on the server',
+  'Média partagé en direct : aucun fichier à télécharger sur le serveur':
+    'Media shared live: there is no file to download on the server',
 };

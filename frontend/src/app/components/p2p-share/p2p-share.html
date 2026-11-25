@@ -1,0 +1,42 @@
+<article class="card">
+  <h2>{{ t('p2p.title') }}</h2>
+  <p class="hint">{{ t('p2p.hint') }}</p>
+  <p class="hint note" role="note">{{ t('p2p.warning') }}</p>
+
+  <label>{{ t('upload.titleField') }}<input [formControl]="title" /></label>
+  <label>
+    {{ t('p2p.file') }}
+    <input
+      #p2pInput
+      type="file"
+      accept="audio/*,video/*,.mkv,.mov,.avi"
+      [disabled]="sending()"
+      (change)="choose($event)"
+    />
+  </label>
+
+  @if (reading()) {
+    <p class="message loading" role="status">{{ t('local.reading') }}</p>
+  }
+  @if (info(); as current) {
+    <p class="message success" role="status">
+      {{
+        t('local.duration', {
+          duration: formatDuration(current.duration),
+          kind: current.kind === 'video' ? t('local.kindVideo') : t('local.kindAudio'),
+        })
+      }}
+    </p>
+  }
+
+  <button type="button" (click)="share()" [disabled]="!info() || sending()">
+    {{ sending() ? t('p2p.adding') : t('p2p.add') }}
+  </button>
+
+  @if (error()) {
+    <p class="message error" role="alert">{{ server(error()) }}</p>
+  }
+  @if (success()) {
+    <p class="message success" role="status">{{ success() }}</p>
+  }
+</article>

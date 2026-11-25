@@ -10,7 +10,6 @@ html {
       density: 0,
     )
   );
-  // Le reste de l'application n'a pas de mode sombre : on le désactive aussi
-  // pour le SnackBar afin que les couleurs restent cohérentes.
-  color-scheme: light;
+  // Le mode clair ou sombre vient de styles.css (color-scheme selon
+  // data-theme, voir ThemeService) : le SnackBar suit le thème choisi.
 }

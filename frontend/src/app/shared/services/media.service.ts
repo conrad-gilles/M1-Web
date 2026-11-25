@@ -1,6 +1,6 @@
 import { inject, Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { LocalMediaDeclaration, Media } from '../models/media.model';
+import { LocalFolderItem, LocalMediaDeclaration, Media } from '../models/media.model';
 import { MediaUrl } from '../models/media-url.model';
 import { Page } from '../models/page.model';
 
@@ -15,10 +15,11 @@ export class MediaService {
     });
   }
 
-  upload(file: File, title: string) {
+  upload(file: File, title: string, folder?: string) {
     const body = new FormData();
     body.append('file', file);
     body.append('title', title);
+    if (folder) body.append('folder', folder);
     // observe: 'events' + reportProgress exposent la progression de l'envoi
     // (HttpEventType.UploadProgress) en plus de la réponse finale.
     return this.http.post<Media>('/api/media', body, {
@@ -30,6 +31,26 @@ export class MediaService {
   /** Déclare un média local : seules ses métadonnées sont envoyées, jamais le fichier. */
   declareLocal(declaration: LocalMediaDeclaration) {
     return this.http.post<Media>('/api/media/local', declaration);
+  }
+
+  /** Déclare un partage direct (P2P) : le fichier reste sur cet appareil. */
+  declareP2p(declaration: LocalMediaDeclaration) {
+    return this.http.post<Media>('/api/media/p2p', declaration);
+  }
+
+  /** Déclare les fichiers d'un dossier local (métadonnées seulement). */
+  declareLocalFolder(folder: string, items: LocalFolderItem[]) {
+    return this.http.post<Media[]>('/api/media/local-folder', { folder, items });
+  }
+
+  /** Tous les médias d'un dossier du salon. */
+  folder(name: string) {
+    return this.http.get<Media[]>('/api/media/folder', { params: { name } });
+  }
+
+  /** URL temporaire qui télécharge le fichier sous son nom d'origine. */
+  downloadUrl(id: string) {
+    return this.http.get<{ url: string; expiresAt: string }>(`/api/media/${id}/download`);
   }
 
   /**

@@ -16,6 +16,10 @@ import { PlaybackState } from '../../shared/models/playback-state.model';
 import { MediaService } from '../../shared/services/media.service';
 import { ChosenFile, LocalFilesService } from '../../shared/services/local-files.service';
 import { formatDuration, sameDuration } from '../../shared/local-media/local-media';
+import { readFolder } from '../../shared/local-media/local-folder';
+import { P2pService } from '../../shared/p2p/p2p.service';
+import { P2pError } from '../../shared/p2p/p2p-transfer';
+import { RoomSessionService } from '../../shared/services/room-session.service';
 import { I18nService } from '../../shared/i18n/i18n.service';
 import { TranslationKey } from '../../shared/i18n/translations';
 import { SyncService } from '../../shared/services/sync.service';
@@ -34,6 +38,25 @@ const HAVE_METADATA = 1;
 /** HTMLMediaElement.HAVE_FUTURE_DATA : assez de données pour continuer à lire. */
 const HAVE_FUTURE_DATA = 3;
 const SKIP_SECONDS = 10;
+/** Explication affichée selon la raison de l'échec d'un partage direct. */
+const P2P_ERRORS: Record<P2pError['code'], TranslationKey> = {
+  offline: 'player.p2pOffline',
+  failed: 'player.p2pFailed',
+  'bad-range': 'player.p2pFailed',
+  'not-shared': 'player.p2pNotShared',
+  closed: 'player.p2pInterrupted',
+};
+
+/** Un saut natif à moins de cet écart de la position du salon n'est pas une demande de saut. */
+const NATIVE_SEEK_THRESHOLD = 0.5;
+/**
+ * Les contrôles natifs envoient parfois plusieurs événements pour un seul
+ * geste (Firefox met en pause puis relance pendant qu'on fait glisser la
+ * barre). On attend la fin du geste et on n'envoie au salon que le résultat.
+ */
+const NATIVE_SETTLE_MS = 250;
+/** Un saut fait par le lecteur lui-même est reconnu à sa cible, pendant ce délai. */
+const SELF_SEEK_MEMORY_MS = 3000;
 
 /**
  * Message à afficher selon le statut HTTP de l'URL du média. 403 : c'est
@@ -50,11 +73,14 @@ export function mediaErrorMessage(status: number): TranslationKey {
 /**
  * Synchronized player of a room.
  *
- * Ce composant n'a pas les contrôles natifs du navigateur : ses boutons
- * envoient des commandes au serveur, et le lecteur n'applique que l'état
- * partagé reçu en retour. Ainsi tout le monde suit la même ligne de temps, et
- * les événements play/pause/seeked déclenchés par l'application d'un état ne
- * peuvent pas repartir comme de nouvelles commandes (pas de boucle d'écho).
+ * Les boutons du composant et les contrôles natifs du navigateur (visibles
+ * aussi en plein écran) envoient des commandes au serveur ; le lecteur
+ * n'applique que l'état partagé reçu en retour. Ainsi tout le monde suit la
+ * même ligne de temps. Les événements play/pause/seeked déclenchés par
+ * l'application d'un état ne repartent pas comme de nouvelles commandes (pas
+ * de boucle d'écho) : le lecteur marque ses propres actions sur l'élément,
+ * et seules les autres comptent comme actions de l'utilisateur (voir
+ * « Contrôles natifs du navigateur » plus bas).
  */
 @Component({
   selector: 'app-sync-player',
@@ -65,6 +91,8 @@ export class SyncPlayerComponent implements OnDestroy {
   private readonly sync = inject(SyncService);
   private readonly mediaService = inject(MediaService);
   private readonly localFiles = inject(LocalFilesService);
+  private readonly p2p = inject(P2pService);
+  private readonly session = inject(RoomSessionService).session;
   private readonly i18n = inject(I18nService);
   readonly t = this.i18n.t;
   readonly server = this.i18n.server;
@@ -97,8 +125,17 @@ export class SyncPlayerComponent implements OnDestroy {
   readonly localKind = signal<'audio' | 'video' | null>(null);
   readonly localError = signal('');
   readonly checkingLocal = signal(false);
-  /** Média local du salon pour lequel ce participant n'a pas encore choisi de fichier. */
-  readonly needsLocalFile = computed(() => this.media()?.source === 'local' && !this.url());
+  /**
+   * Partage direct (P2P) : connexion au participant qui partage en cours, ou
+   * fichier à choisir de nouveau par celui qui le partage (page rechargée).
+   */
+  readonly p2pStatus = signal<'idle' | 'connecting' | 'reshare'>('idle');
+  /** Média local (ou partage à rechoisir) pour lequel ce participant n'a pas encore choisi de fichier. */
+  readonly needsLocalFile = computed(
+    () =>
+      !this.url() &&
+      (this.media()?.source === 'local' || (this.media()?.source === 'p2p' && this.p2pStatus() === 'reshare')),
+  );
   readonly playerKind = computed(() => this.localKind() ?? this.media()?.kind ?? 'audio');
 
   readonly paused = computed(() => this.state()?.paused ?? true);
@@ -121,6 +158,18 @@ export class SyncPlayerComponent implements OnDestroy {
 
   /** Identifiant du média demandé en dernier, pour ignorer une réponse périmée. */
   private requestedId: string | null = null;
+  // Actions du lecteur lui-même sur l'élément : leurs événements ne sont pas
+  // des actions de l'utilisateur (voir « Contrôles natifs du navigateur »).
+  private selfPlay = false;
+  private selfPause = false;
+  private selfSeek: { target: number; at: number } | null = null;
+  private nativeTimer?: ReturnType<typeof setTimeout>;
+  /**
+   * Après une commande venue des contrôles natifs, la boucle de surveillance
+   * laisse le lecteur tel que l'utilisateur l'a mis jusqu'à la réponse du
+   * salon (1 s au plus), au lieu de le remettre brièvement dans l'ancien état.
+   */
+  private nativeCommandUntil = 0;
   /** URL `blob:` du fichier local en lecture, à libérer au changement de média. */
   private objectUrl: string | null = null;
   /** Vrai pendant un rattrapage par la vitesse (voir driftCorrection). */
@@ -136,11 +185,27 @@ export class SyncPlayerComponent implements OnDestroy {
       untracked(() => this.loadMedia(mediaId));
     });
 
+    this.installDebugHook();
+
+    // Un fichier ou un dossier vient d'être retenu (carte « Synchroniser ») :
+    // si le lecteur attendait la copie de ce participant, il la cherche.
+    effect(() => {
+      this.localFiles.changes();
+      untracked(() => {
+        const media = this.media();
+        if (media && this.needsLocalFile() && !this.checkingLocal()) this.findLocalCopy(media);
+      });
+    });
+
     // Un nouvel état arrive, ou le lecteur vient d'être créé : on l'applique.
     effect(() => {
       this.state();
       this.player();
-      untracked(() => this.apply());
+      untracked(() => {
+        // La réponse du salon est là : la boucle de surveillance reprend la main.
+        this.nativeCommandUntil = 0;
+        this.apply();
+      });
     });
 
     // Après une reconnexion, le serveur a oublié nos signalements de buffering.
@@ -149,8 +214,29 @@ export class SyncPlayerComponent implements OnDestroy {
     });
   }
 
+  /**
+   * Aide aux tests de bout en bout, active seulement si localStorage contient
+   * `sharing_platform_debug=1` : décale le lecteur comme le ferait une vraie
+   * dérive (réseau lent, appareil chargé), sans que ce soit pris pour un saut
+   * demandé par l'utilisateur.
+   */
+  private installDebugHook(): void {
+    try {
+      if (localStorage.getItem('sharing_platform_debug') !== '1') return;
+    } catch {
+      return;
+    }
+    (window as unknown as { __syncPlayer?: unknown }).__syncPlayer = {
+      drift: (seconds: number) => {
+        const element = this.player()?.nativeElement;
+        if (element) this.selfSeekElement(element, Math.max(0, element.currentTime + seconds));
+      },
+    };
+  }
+
   ngOnDestroy(): void {
     clearInterval(this.timer);
+    clearTimeout(this.nativeTimer);
     this.releaseLocalFile();
   }
 
@@ -165,7 +251,7 @@ export class SyncPlayerComponent implements OnDestroy {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     const media = this.media();
-    if (!file || media?.source !== 'local') return;
+    if (!file || !media || !this.needsLocalFile()) return;
 
     this.localError.set('');
     this.checkingLocal.set(true);
@@ -185,11 +271,98 @@ export class SyncPlayerComponent implements OnDestroy {
       }
       const chosen = { file, info };
       this.localFiles.remember(media.id, chosen);
+      // Celui qui partage en direct rechoisit son fichier : il le diffuse de nouveau.
+      if (media.source === 'p2p') {
+        this.p2p.share(media.id, file);
+        this.p2pStatus.set('idle');
+      }
       this.useLocalFile(chosen);
     } catch (error) {
       console.warn('[SyncPlayer] Fichier local illisible', error);
       this.localError.set(this.t('player.localUnreadable'));
       input.value = '';
+    } finally {
+      this.checkingLocal.set(false);
+    }
+  }
+
+  /**
+   * Partage direct : celui qui partage lit son propre fichier ; les autres
+   * ouvrent une connexion directe et lisent le flux servi par le service worker.
+   */
+  private startP2p(media: Media): void {
+    const name = media.owner?.name ?? '';
+    if (media.owner?.id === this.session()?.participant.id) {
+      const file = this.p2p.sharedFile(media.id);
+      if (file) this.useLocalFile({ file, info: { duration: media.duration ?? 0, kind: media.kind } });
+      else this.p2pStatus.set('reshare');
+      return;
+    }
+
+    this.p2pStatus.set('connecting');
+    this.p2p
+      .prepare(media)
+      .then((url) => {
+        if (this.media()?.id !== media.id) return; // le salon a changé de média entre-temps
+        this.p2pStatus.set('idle');
+        this.url.set(url);
+      })
+      .catch((error: unknown) => {
+        if (this.media()?.id !== media.id) return;
+        this.p2pStatus.set('idle');
+        const code = error instanceof P2pError ? error.code : 'failed';
+        console.warn('[SyncPlayer] Partage direct indisponible', code);
+        // Une connexion ratée est oubliée : « Réessayer » en ouvre une nouvelle.
+        if (code !== 'offline' && media.owner) this.p2p.forget(media.owner.id);
+        this.error.set(this.t(P2P_ERRORS[code], { name }));
+      });
+  }
+
+  /** Copie déjà connue de ce participant : fichier choisi, ou dossier de même nom. */
+  private findLocalCopy(media: Media): void {
+    const chosen = this.localFiles.get(media.id);
+    if (chosen) this.useLocalFile(chosen);
+    else if (media.folder && this.localFiles.hasFolder(media.folder)) void this.lookInFolder(media);
+  }
+
+  /** Dossier choisi (ici ou dans la carte « Synchroniser ») : le participant choisit son dossier de même nom. */
+  async chooseLocalFolder(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const media = this.media();
+    const chosen = readFolder(Array.from(input.files ?? []));
+    input.value = '';
+    if (!chosen || !media?.folder) return;
+    this.localError.set('');
+    if (chosen.folder !== media.folder) {
+      this.localError.set(this.t('player.folderWrongName', { actual: chosen.folder, expected: media.folder }));
+      return;
+    }
+    this.localFiles.rememberFolder(chosen.folder, chosen.files);
+    await this.lookInFolder(media);
+  }
+
+  /** Même chemin, même durée : la copie du dossier est lue, sinon on explique pourquoi. */
+  private async lookInFolder(media: Media): Promise<void> {
+    this.checkingLocal.set(true);
+    try {
+      const found = await this.localFiles.fromFolder(media);
+      if (this.media()?.id !== media.id) return; // le salon a changé de média entre-temps
+      if (found.status === 'found') {
+        this.localError.set('');
+        this.useLocalFile(found.chosen);
+      } else if (found.status === 'missing') {
+        this.localError.set(this.t('player.folderMissing', { folder: media.folder ?? '', path: media.originalName }));
+      } else {
+        this.localError.set(
+          this.t('local.mismatch', {
+            actual: formatDuration(found.duration),
+            expected: formatDuration(media.duration ?? 0),
+          }),
+        );
+      }
+    } catch (error) {
+      console.warn('[SyncPlayer] Copie du dossier illisible', error);
+      this.localError.set(this.t('player.localUnreadable'));
     } finally {
       this.checkingLocal.set(false);
     }
@@ -271,7 +444,111 @@ export class SyncPlayerComponent implements OnDestroy {
     this.loadMedia(mediaId);
   }
 
-  // --- Événements du lecteur : aucun ne renvoie de commande play/pause/seek --
+  // --- Contrôles natifs du navigateur -------------------------------------------
+  //
+  // Le lecteur affiche les contrôles de Firefox/Chrome (y compris en plein
+  // écran). Les navigateurs ne signalent pas les clics sur ces contrôles à la
+  // page : on ne voit que les événements play, pause et seeked. Règle :
+  // - le lecteur marque chaque play(), pause() ou saut qu'il fait lui-même
+  //   (appliquer l'état du salon, corriger la dérive) ; leurs événements sont
+  //   ignorés, ce qui empêche toute boucle d'écho ;
+  // - tout autre play, pause ou saut vient de l'utilisateur (contrôles
+  //   natifs, clavier, touche multimédia, casque) : à la fin du geste, on
+  //   envoie au salon l'état auquel il a mené le lecteur.
+
+  onNativePlay(): void {
+    if (this.selfPlay) {
+      this.selfPlay = false;
+      return;
+    }
+    // Lancer la lecture soi-même vaut le clic demandé par la règle d'autoplay.
+    if (this.needsGesture()) {
+      this.needsGesture.set(false);
+      if (this.state() && !this.state()!.paused) this.apply();
+    }
+    this.userChangedPlayer();
+  }
+
+  onNativePause(): void {
+    if (this.selfPause) {
+      this.selfPause = false;
+      return;
+    }
+    this.userChangedPlayer();
+  }
+
+  onNativeSeeked(): void {
+    const element = this.player()?.nativeElement;
+    const self = this.selfSeek;
+    if (element && self && Date.now() - self.at < SELF_SEEK_MEMORY_MS && Math.abs(element.currentTime - self.target) < 0.25) {
+      this.selfSeek = null;
+      return;
+    }
+    this.userChangedPlayer();
+  }
+
+  /**
+   * L'utilisateur vient de changer le lecteur. La surveillance le laisse tel
+   * quel le temps du geste, puis on envoie au salon ce qui diffère de son état.
+   */
+  private userChangedPlayer(): void {
+    if (!this.ready()) return;
+    this.nativeCommandUntil = Date.now() + NATIVE_SETTLE_MS + CORRECTION_INTERVAL_MS;
+    clearTimeout(this.nativeTimer);
+    this.nativeTimer = setTimeout(() => this.sendUserChange(), NATIVE_SETTLE_MS);
+  }
+
+  private sendUserChange(): void {
+    const current = this.ready();
+    if (!current) return;
+    const { element, state } = current;
+    this.nativeCommandUntil = Date.now() + CORRECTION_INTERVAL_MS;
+
+    const expected = this.clamp(expectedPosition(state, this.sync.serverNow()));
+    if (Math.abs(element.currentTime - expected) > NATIVE_SEEK_THRESHOLD && !this.atEnd(element)) {
+      console.debug('[SyncPlayer] Saut depuis les contrôles natifs', element.currentTime);
+      this.command({ type: 'seek', position: this.clamp(element.currentTime) });
+    }
+    // La pause automatique en fin de média est traitée par onEnded.
+    if (element.paused && !state.paused && !this.atEnd(element)) {
+      console.debug('[SyncPlayer] Pause depuis les contrôles natifs');
+      this.command({ type: 'pause' });
+    } else if (!element.paused && state.paused) {
+      console.debug('[SyncPlayer] Lecture depuis les contrôles natifs');
+      this.command({ type: 'play' });
+    }
+  }
+
+  /** Les actions du lecteur lui-même sur l'élément passent par ces trois fonctions. */
+  private selfPlayElement(element: HTMLMediaElement): Promise<void> | undefined {
+    this.selfPlay = true;
+    const result = element.play();
+    return result?.catch((error: unknown) => {
+      this.selfPlay = false; // refusé : aucun événement play ne viendra
+      throw error;
+    });
+  }
+
+  private selfPauseElement(element: HTMLMediaElement): void {
+    if (element.paused) return;
+    this.selfPause = true;
+    element.pause();
+  }
+
+  private selfSeekElement(element: HTMLMediaElement, position: number): void {
+    this.selfSeek = { target: position, at: Date.now() };
+    element.currentTime = position;
+  }
+
+  /** Volume ou sourdine changés avec les contrôles natifs : réglage local, reflété dans nos curseurs. */
+  onVolumeChange(): void {
+    const element = this.player()?.nativeElement;
+    if (!element) return;
+    this.volume.set(element.volume);
+    this.muted.set(element.muted);
+  }
+
+  // --- Événements du lecteur ------------------------------------------------------
 
   onLoadedMetadata(): void {
     const element = this.player()?.nativeElement;
@@ -307,6 +584,12 @@ export class SyncPlayerComponent implements OnDestroy {
       this.error.set(this.t('player.localBroken'));
       return;
     }
+    if (media?.source === 'p2p' && media.owner?.id !== this.session()?.participant.id) {
+      // Flux interrompu (pair parti, connexion coupée) : « Réessayer » se reconnecte.
+      if (media.owner) this.p2p.forget(media.owner.id);
+      this.error.set(this.t('player.p2pInterrupted', { name: media.owner?.name ?? '' }));
+      return;
+    }
     this.error.set(this.t('player.errorDefault'));
     const url = this.url();
     if (!url) return;
@@ -340,10 +623,14 @@ export class SyncPlayerComponent implements OnDestroy {
         this.media.set(media);
         this.mediaChange.emit(media);
         if (media.source === 'local') {
-          // Pas d'URL : chacun lit sa copie. Fichier déjà choisi pendant la session ?
+          // Pas d'URL : chacun lit sa copie (fichier ou dossier déjà choisi pendant la session ?).
           this.duration.set(media.duration ?? 0);
-          const chosen = this.localFiles.get(media.id);
-          if (chosen) this.useLocalFile(chosen);
+          this.findLocalCopy(media);
+          return;
+        }
+        if (media.source === 'p2p') {
+          this.duration.set(media.duration ?? 0);
+          this.startP2p(media);
           return;
         }
         console.debug('[SyncPlayer] URL de lecture reçue', mediaId);
@@ -363,7 +650,13 @@ export class SyncPlayerComponent implements OnDestroy {
     this.media.set(null);
     this.url.set('');
     this.releaseLocalFile();
+    clearTimeout(this.nativeTimer);
+    this.selfPlay = false;
+    this.selfPause = false;
+    this.selfSeek = null;
+    this.nativeCommandUntil = 0;
     this.localKind.set(null);
+    this.p2pStatus.set('idle');
     this.localError.set('');
     this.checkingLocal.set(false);
     this.error.set('');
@@ -394,12 +687,12 @@ export class SyncPlayerComponent implements OnDestroy {
     const { element, state } = current;
 
     if (state.paused) {
-      if (!element.paused) element.pause();
+      this.selfPauseElement(element);
       element.playbackRate = state.rate;
       this.correcting = false;
       this.drift.set(null);
       const expected = this.clamp(expectedPosition(state, this.sync.serverNow()));
-      if (Math.abs(element.currentTime - expected) > PAUSED_TOLERANCE) element.currentTime = expected;
+      if (Math.abs(element.currentTime - expected) > PAUSED_TOLERANCE) this.selfSeekElement(element, expected);
     } else {
       this.correct(element, state);
       this.resume(element);
@@ -421,7 +714,7 @@ export class SyncPlayerComponent implements OnDestroy {
     this.drift.set(correction.drift);
 
     if (correction.type === 'seek') {
-      element.currentTime = this.clamp(correction.position);
+      this.selfSeekElement(element, this.clamp(correction.position));
       element.playbackRate = state.rate;
       this.correcting = false;
     } else if (correction.type === 'rate') {
@@ -437,7 +730,7 @@ export class SyncPlayerComponent implements OnDestroy {
   private resume(element: HTMLMediaElement): void {
     if (!element.paused || this.atEnd(element) || this.needsGesture()) return;
     // play() est refusé tant que l'utilisateur n'a pas interagi avec la page.
-    element.play()?.catch((error: unknown) => {
+    this.selfPlayElement(element)?.catch((error: unknown) => {
       if (error instanceof DOMException && error.name === 'NotAllowedError') {
         console.warn('[SyncPlayer] Lecture automatique bloquée par le navigateur');
         this.needsGesture.set(true);
@@ -456,14 +749,17 @@ export class SyncPlayerComponent implements OnDestroy {
     if (this.scrubPosition() === null) this.position.set(element.currentTime);
     const stalled = this.watchBuffering(element, state);
 
+    // Commande native en route : on laisse le lecteur tel que l'utilisateur l'a mis.
+    if (Date.now() < this.nativeCommandUntil) return;
+
     if (state.paused) {
-      if (!element.paused) element.pause();
+      this.selfPauseElement(element);
       return;
     }
     if (this.needsGesture() || Date.now() - this.lastCorrectionAt < CORRECTION_INTERVAL_MS) return;
 
-    // Le salon lit : on suit, même si le lecteur a été arrêté par ailleurs
-    // (touche multimédia du clavier, par exemple).
+    // Le salon lit : on suit, même si le lecteur s'est arrêté sans événement
+    // de pause (blocage du navigateur, par exemple).
     this.resume(element);
     // Pendant un blocage, un saut ne ferait que relancer le chargement.
     if (stalled) this.lastCorrectionAt = Date.now();

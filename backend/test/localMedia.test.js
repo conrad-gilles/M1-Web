@@ -1,6 +1,5 @@
 import test, { mock } from "node:test";
 import assert from "node:assert/strict";
-import { MAX_MEDIA_PER_ROOM } from "../src/config.js";
 import { Media } from "../src/models/Media.js";
 import { startTestApp } from "./helpers/testApp.js";
 
@@ -70,13 +69,102 @@ test("média local : titre, durée et type sont vérifiés (400)", async () => {
   assert.equal(t.db.all(Media).length, 0);
 });
 
-test("média local : compte dans le quota de médias du salon (409)", async () => {
+test("médias locaux : pas de nombre maximal par salon", async () => {
   const { token } = await t.createRoom();
-  mock.method(Media, "countDocuments", async () => MAX_MEDIA_PER_ROOM);
 
-  const r = await declare(token);
+  for (let i = 0; i < 25; i += 1) assert.equal((await declare(token, { ...LOCAL, title: `Film ${i}` })).status, 201);
+  assert.equal(t.db.all(Media).length, 25);
+});
+
+test("média local : rien à télécharger sur le serveur (409)", async () => {
+  const { token } = await t.createRoom();
+  const media = await (await declare(token)).json();
+
+  const r = await t.json("GET", `/api/media/${media.id}/download`, { token });
 
   assert.equal(r.status, 409);
+  assert.equal((await r.json()).message, "Média local : aucun fichier à télécharger sur le serveur");
+});
+
+/* --- Dossiers locaux ------------------------------------------------------- */
+
+const FOLDER = {
+  folder: "Ma série",
+  items: [
+    { originalName: "Saison 1/ep02.mkv", duration: 1500.2, kind: "video", size: 9e8 },
+    { originalName: "Saison 1/ep01.mkv", duration: 1490.7, kind: "video", size: 9e8, title: "Le pilote" },
+    { originalName: "générique.mp3", duration: 61, kind: "audio" },
+  ],
+};
+const declareFolder = (token, body = FOLDER) => t.json("POST", "/api/media/local-folder", { token, body });
+
+test("dossier local : tous les fichiers déclarés d'un coup, avec le nom du dossier", async () => {
+  const { token } = await t.createRoom();
+
+  const r = await declareFolder(token);
+  const body = await r.json();
+
+  assert.equal(r.status, 201);
+  assert.deepEqual(
+    body.map(({ source, folder, originalName, title, duration }) => ({ source, folder, originalName, title, duration })),
+    [
+      { source: "local", folder: "Ma série", originalName: "Saison 1/ep02.mkv", title: "ep02.mkv", duration: 1500.2 },
+      { source: "local", folder: "Ma série", originalName: "Saison 1/ep01.mkv", title: "Le pilote", duration: 1490.7 },
+      { source: "local", folder: "Ma série", originalName: "générique.mp3", title: "générique.mp3", duration: 61 },
+    ],
+  );
+  assert.deepEqual(t.storedFiles(), []);
+});
+
+test("dossier local : nom du dossier, liste et chaque fichier sont vérifiés (400, rien n'est gardé)", async () => {
+  const { token } = await t.createRoom();
+  const cases = [
+    [{ ...FOLDER, folder: "  " }, "Nom du dossier requis (200 caractères maximum)"],
+    [{ ...FOLDER, folder: "x".repeat(201) }, "Nom du dossier requis (200 caractères maximum)"],
+    [{ ...FOLDER, items: [] }, "Liste de fichiers requise (1000 au plus par envoi)"],
+    [{ folder: "Ma série" }, "Liste de fichiers requise (1000 au plus par envoi)"],
+    [
+      { ...FOLDER, items: [...FOLDER.items, { originalName: "cassé.mkv", duration: 0, kind: "video" }] },
+      "cassé.mkv : Durée du média requise (nombre de secondes positif)",
+    ],
+    [{ ...FOLDER, items: [{ title: "Sans chemin", duration: 3, kind: "audio" }] }, "Chemin du fichier requis dans le dossier"],
+  ];
+
+  for (const [body, message] of cases) {
+    const r = await declareFolder(token, body);
+    assert.equal(r.status, 400, message);
+    assert.equal((await r.json()).message, message);
+  }
+  assert.equal(t.db.all(Media).length, 0);
+});
+
+test("dossier : la liste d'un dossier du salon, triée par chemin, sans ceux des autres salons", async () => {
+  const a = await t.createRoom();
+  const b = await t.createRoom();
+  await declareFolder(a.token);
+  await declareFolder(b.token, { folder: "Ma série", items: [{ originalName: "autre.mkv", duration: 5, kind: "video" }] });
+  await declareFolder(a.token, { folder: "Autre dossier", items: [{ originalName: "x.mp3", duration: 5, kind: "audio" }] });
+
+  const r = await t.json("GET", `/api/media/folder?name=${encodeURIComponent("Ma série")}`, { token: a.token });
+  const items = await r.json();
+
+  assert.equal(r.status, 200);
+  assert.deepEqual(
+    items.map((media) => media.originalName),
+    ["Saison 1/ep01.mkv", "Saison 1/ep02.mkv", "générique.mp3"],
+  );
+  assert.equal((await t.json("GET", "/api/media/folder?name=", { token: a.token })).status, 400);
+  assert.equal((await t.json("GET", "/api/media/folder?name=x")).status, 401);
+});
+
+test("dossier local : apparaît dans la liste paginée avec son dossier", async () => {
+  const { token } = await t.createRoom();
+  await declareFolder(token);
+
+  const list = await (await t.json("GET", "/api/media?limit=20", { token })).json();
+
+  assert.equal(list.total, 3);
+  assert.ok(list.items.every((media) => media.folder === "Ma série" && media.source === "local"));
 });
 
 test("média local : GET /url ne donne pas d'URL, seulement les métadonnées", async () => {

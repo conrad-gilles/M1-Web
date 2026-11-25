@@ -40,6 +40,8 @@ const media = (id: string, kind: Media['kind'] = 'audio'): Media => ({
   id,
   source: 'upload',
   duration: null,
+  folder: null,
+  owner: null,
   kind,
   title: `Média ${id}`,
   originalName: `${id}.mp3`,

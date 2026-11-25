@@ -30,7 +30,7 @@ function matches(doc, filter = {}) {
 function query(run) {
   const options = {};
   const chain = {
-    sort: () => ((options.sorted = true), chain),
+    sort: (spec = { createdAt: -1 }) => ((options.sorted = spec), chain),
     skip: (n) => ((options.skip = n), chain),
     limit: (n) => ((options.limit = n), chain),
     select: () => chain,
@@ -89,10 +89,26 @@ export function installFakeDb(...models) {
       return doc;
     };
 
+    /** Comme Mongoose : tout est validé avant d'enregistrer quoi que ce soit. */
+    Model.insertMany = async (list) => {
+      const docs = list.map((fields) => new Model(fields));
+      for (const doc of docs) {
+        const invalid = doc.validateSync();
+        if (invalid) throw invalid;
+      }
+      const created = [];
+      for (const doc of docs) created.push(await Model.create(doc.toObject()));
+      return created;
+    };
+
     Model.find = (filter) =>
       query((options) => {
         let found = all().filter((doc) => matches(doc, filter));
-        if (options.sorted) found = [...found].sort((a, b) => b.createdAt - a.createdAt);
+        if (options.sorted) {
+          const [field, direction] = Object.entries(options.sorted)[0];
+          const value = (doc) => (doc[field] instanceof Date ? doc[field].getTime() : doc[field]);
+          found = [...found].sort((a, b) => (value(a) < value(b) ? -direction : value(a) > value(b) ? direction : 0));
+        }
         if (options.skip) found = found.slice(options.skip);
         if (options.limit) found = found.slice(0, options.limit);
         return options.lean ? found.map((doc) => doc.toObject()) : found;

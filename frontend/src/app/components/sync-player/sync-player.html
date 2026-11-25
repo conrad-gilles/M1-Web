@@ -10,19 +10,47 @@
     @if (needsLocalFile()) {
       <!-- Média local : rien n'est téléchargé, chacun choisit sa propre copie. -->
       <div class="local-pick">
-        <p>
-          <b>{{ t('player.localTitle') }}</b>
-          {{ t('player.localPick', { title: current.title, duration: formatDuration(current.duration ?? 0) }) }}
-        </p>
-        <label>
-          {{ t('player.localInput') }}
-          <input
-            type="file"
-            accept="audio/*,video/*,.mkv,.mov,.avi"
-            [disabled]="checkingLocal()"
-            (change)="chooseLocalFile($event)"
-          />
-        </label>
+        @if (current.folder) {
+          <!-- Fichier d'un dossier local : on choisit son dossier de même nom. -->
+          <p>
+            <b>{{ t('player.localTitle') }}</b>
+            {{
+              t('player.folderPick', {
+                path: current.originalName,
+                folder: current.folder,
+                duration: formatDuration(current.duration ?? 0),
+              })
+            }}
+          </p>
+          <label>
+            {{ t('player.folderInput', { folder: current.folder }) }}
+            <input
+              type="file"
+              webkitdirectory
+              multiple
+              [disabled]="checkingLocal()"
+              (change)="chooseLocalFolder($event)"
+            />
+          </label>
+        } @else {
+          <p>
+            @if (current.source === 'p2p') {
+              {{ t('player.p2pReshare', { title: current.title }) }}
+            } @else {
+              <b>{{ t('player.localTitle') }}</b>
+              {{ t('player.localPick', { title: current.title, duration: formatDuration(current.duration ?? 0) }) }}
+            }
+          </p>
+          <label>
+            {{ t('player.localInput') }}
+            <input
+              type="file"
+              accept="audio/*,video/*,.mkv,.mov,.avi"
+              [disabled]="checkingLocal()"
+              (change)="chooseLocalFile($event)"
+            />
+          </label>
+        }
         @if (checkingLocal()) {
           <p class="message loading" role="status">{{ t('player.checkingDuration') }}</p>
         }
@@ -32,16 +60,26 @@
       </div>
     }
 
-    <!-- Pas d'attribut `controls` : les boutons ci-dessous envoient des
-         commandes au salon, et le lecteur applique l'état reçu en retour. -->
+    @if (p2pStatus() === 'connecting') {
+      <p class="message loading" role="status">{{ t('player.p2pConnecting', { name: current.owner?.name ?? '' }) }}</p>
+    }
+
+    <!-- Contrôles natifs du navigateur (aussi en plein écran) : leurs actions
+         deviennent des commandes pour tout le salon (voir onNativePlay…). Les
+         boutons ci-dessous font de même ; le lecteur applique l'état reçu. -->
     @if (!url()) {
       <!-- URL pas encore reçue, ou fichier local pas encore choisi. -->
     } @else if (playerKind() === 'video') {
       <video
         #player
         [src]="url()"
+        controls
         preload="auto"
         playsinline
+        (play)="onNativePlay()"
+        (pause)="onNativePause()"
+        (seeked)="onNativeSeeked()"
+        (volumechange)="onVolumeChange()"
         (loadedmetadata)="onLoadedMetadata()"
         (timeupdate)="onTimeUpdate()"
         (ended)="onEnded()"
@@ -51,7 +89,12 @@
       <audio
         #player
         [src]="url()"
+        controls
         preload="auto"
+        (play)="onNativePlay()"
+        (pause)="onNativePause()"
+        (seeked)="onNativeSeeked()"
+        (volumechange)="onVolumeChange()"
         (loadedmetadata)="onLoadedMetadata()"
         (timeupdate)="onTimeUpdate()"
         (ended)="onEnded()"

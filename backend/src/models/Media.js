@@ -16,15 +16,30 @@ const schema = new mongoose.Schema(
     // upload : fichier envoyé, gardé par le module de stockage.
     // local : rien n'est envoyé ; chaque participant lit sa propre copie du
     // fichier, reconnue à sa durée (voir POST /media/local).
-    source: { type: String, enum: ["upload", "local"], default: "upload" },
+    // p2p : rien n'est envoyé au serveur ; le participant qui partage le
+    // fichier le diffuse directement aux autres navigateurs (WebRTC).
+    source: { type: String, enum: ["upload", "local", "p2p"], default: "upload" },
+    // Participant qui partage un média p2p (identifiant et nom d'affichage).
+    ownerId: {
+      type: String,
+      required() {
+        return this.source === "p2p";
+      },
+    },
+    ownerName: { type: String, default: "" },
     kind: { type: String, required: true, enum: ["audio", "video"] },
     title: { type: String, required: true, trim: true, maxlength: 200 },
-    originalName: { type: String, default: "", maxlength: 255 },
+    // Chemin du fichier dans son dossier (« Saison 1/ep01.mkv ») ou simple nom.
+    originalName: { type: String, default: "", maxlength: 500 },
+    // Dossier d'origine (nom du dossier choisi par l'utilisateur), ou null.
+    // Pour un dossier local, deux participants doivent avoir un dossier de
+    // même nom, contenant des fichiers de même chemin et de même durée.
+    folder: { type: String, default: null, trim: true, maxlength: 200 },
     storageKey: {
       type: String,
       select: false,
       required() {
-        return this.source !== "local";
+        return this.source === "upload"; // local et p2p : aucun fichier côté serveur
       },
     },
     mimeType: { type: String, default: "", maxlength: 100 },
@@ -35,7 +50,7 @@ const schema = new mongoose.Schema(
       type: Number,
       min: 0,
       required() {
-        return this.source === "local";
+        return this.source === "local" || this.source === "p2p";
       },
     },
   },
@@ -54,6 +69,8 @@ schema.methods.toPublic = function () {
     id: this.id,
     source: this.source ?? "upload",
     duration: this.duration ?? null,
+    folder: this.folder ?? null,
+    owner: this.source === "p2p" ? { id: this.ownerId, name: this.ownerName } : null,
     kind: this.kind,
     title: this.title,
     originalName: this.originalName,

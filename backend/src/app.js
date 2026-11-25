@@ -44,7 +44,8 @@ export function createApp({
   }
 
   // Transforme un corps JSON en objet JavaScript accessible via req.body.
-  app.use(express.json());
+  // 1 Mo : assez pour la liste des fichiers d'un dossier local (POST /api/media/local-folder).
+  app.use(express.json({ limit: "1mb" }));
 
   /** Endpoint public utilisé pour vérifier que l'API répond. */
   app.get("/api/health", (_req, res) => {

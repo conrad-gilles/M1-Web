@@ -27,7 +27,7 @@ function watchUploads(page) {
 async function declareLocal(page, file, title) {
   const card = page.locator("app-local-media");
   await card.getByRole("textbox", { name: "Titre" }).fill(title);
-  await card.locator('input[type="file"]').setInputFiles(file);
+  await card.locator('input[type="file"]:not([webkitdirectory])').setInputFiles(file);
   await expect(card.getByText(/Durée : 0:08 \(vidéo\)/)).toBeVisible();
   await card.getByRole("button", { name: "Ajouter au salon" }).click();
   await expect(card.getByText("chacun lira sa propre copie")).toBeVisible();
@@ -56,12 +56,12 @@ test("deux personnes lisent chacune leur copie locale, synchronisées, sans rien
   await expect(picker).toContainText("Choisissez votre copie de « Clip local »");
 
   // Mauvais fichier (autre durée) : refusé.
-  await picker.locator('input[type="file"]').setInputFiles(SONG);
+  await picker.locator('input[type="file"]:not([webkitdirectory])').setInputFiles(SONG);
   await expect(picker.getByRole("alert")).toContainText("celui du salon 0:08");
   await expect(sam.locator("app-sync-player video, app-sync-player audio")).toHaveCount(0);
 
   // Même vidéo sous un autre nom : acceptée.
-  await picker.locator('input[type="file"]').setInputFiles(copyOfClip("Ma copie à moi.mp4"));
+  await picker.locator('input[type="file"]:not([webkitdirectory])').setInputFiles(copyOfClip("Ma copie à moi.mp4"));
   await readyVideo(sam);
   await expect(picker).toHaveCount(0);
   expect(await sam.evaluate(() => document.querySelector("app-sync-player video").src)).toMatch(/^blob:/);

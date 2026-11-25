@@ -2,6 +2,7 @@ import { Component, inject } from '@angular/core';
 import { RouterLink, RouterOutlet } from '@angular/router';
 import { I18nService } from '../../shared/i18n/i18n.service';
 import { RoomSessionService } from '../../shared/services/room-session.service';
+import { ThemeService } from '../../shared/theme/theme.service';
 
 @Component({
   selector: 'app-root',
@@ -14,4 +15,5 @@ export class AppComponent {
   readonly i18n = inject(I18nService);
   readonly t = this.i18n.t;
   readonly language = this.i18n.language;
+  readonly theme = inject(ThemeService);
 }

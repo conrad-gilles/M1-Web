@@ -6,7 +6,7 @@ import path from "node:path";
 import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
 import { createApp } from "../src/app.js";
-import { MAX_MEDIA_PER_ROOM, SECRET } from "../src/config.js";
+import { SECRET } from "../src/config.js";
 import { Media } from "../src/models/Media.js";
 import { mp3, startTestApp } from "./helpers/testApp.js";
 
@@ -128,15 +128,63 @@ test("upload : aucun fichier orphelin si MongoDB échoue", async () => {
   assert.deepEqual(t.storedFiles(), []);
 });
 
-test("quota : un salon plein refuse l'upload (409) sans garder le fichier", async () => {
+test("pas de nombre maximal de médias par salon (l'ancienne limite était 20)", async () => {
   const { token } = await t.createRoom();
-  mock.method(Media, "countDocuments", async () => MAX_MEDIA_PER_ROOM);
 
-  const r = await t.upload(token, { file: mp3() });
+  for (let i = 0; i < 22; i += 1) {
+    const r = await t.upload(token, { title: `Piste ${i}`, file: mp3() });
+    assert.equal(r.status, 201, `upload ${i}`);
+  }
+  assert.equal(t.db.all(Media).length, 22);
+});
 
-  assert.equal(r.status, 409);
-  assert.equal((await r.json()).message, `Salon plein : ${MAX_MEDIA_PER_ROOM} médias maximum`);
-  assert.deepEqual(t.storedFiles(), []);
+test("envoi d'un dossier : chaque fichier garde le nom de son dossier", async () => {
+  const { token } = await t.createRoom();
+  const form = new FormData();
+  form.append("title", "Épisode 1");
+  form.append("folder", "  Ma série  ");
+  form.append("file", new Blob(["ID3"], { type: "audio/mpeg" }), "ep1.mp3");
+
+  const r = await fetch(t.base + "/api/media", { method: "POST", headers: { authorization: `Bearer ${token}` }, body: form });
+  const body = await r.json();
+
+  assert.equal(r.status, 201);
+  assert.deepEqual({ folder: body.folder, originalName: body.originalName }, { folder: "Ma série", originalName: "ep1.mp3" });
+  const plain = await (await t.upload(token, { file: mp3() })).json();
+  assert.equal(plain.folder, null);
+});
+
+test("téléchargement : URL temporaire qui enregistre le fichier sous son nom d'origine", async () => {
+  const { token } = await t.createRoom();
+  const media = await (await t.upload(token, { title: "Blues", file: mp3("ID3-données", "Mon Blues été.mp3") })).json();
+
+  const r = await t.json("GET", `/api/media/${media.id}/download`, { token });
+  const { url, expiresAt } = await r.json();
+
+  assert.equal(r.status, 200);
+  assert.ok(expiresAt);
+  const file = await fetch(t.base + url);
+  assert.equal(file.status, 200);
+  assert.match(file.headers.get("content-disposition"), /^attachment;/);
+  assert.match(file.headers.get("content-disposition"), /filename\*=UTF-8''Mon%20Blues%20%C3%A9t%C3%A9\.mp3/);
+  assert.equal(file.headers.get("content-type"), "audio/mpeg");
+  assert.equal(await file.text(), "ID3-données");
+  // Le nom accentué est bien reçu en UTF-8 (pas « Ã©tÃ© »).
+  assert.equal(media.originalName, "Mon Blues été.mp3");
+
+  // L'URL de lecture, elle, n'est pas une pièce jointe.
+  const play = await (await t.json("GET", `/api/media/${media.id}/url`, { token })).json();
+  assert.equal((await fetch(t.base + play.url)).headers.get("content-disposition"), null);
+});
+
+test("téléchargement : média inconnu ou d'un autre salon → 404, sans jeton → 401", async () => {
+  const a = await t.createRoom();
+  const b = await t.createRoom();
+  const media = await (await t.upload(a.token, { file: mp3() })).json();
+
+  assert.equal((await t.json("GET", `/api/media/${media.id}/download`, { token: b.token })).status, 404);
+  assert.equal((await t.json("GET", "/api/media/123/download", { token: a.token })).status, 404);
+  assert.equal((await t.json("GET", `/api/media/${media.id}/download`)).status, 401);
 });
 
 test("pagination : page et limit, médias du salon uniquement, du plus récent au plus ancien", async () => {
@@ -157,7 +205,7 @@ test("pagination : page et limit, médias du salon uniquement, du plus récent a
   );
   assert.deepEqual(body.items.map((item) => item.title), ["C", "B"]);
   assert.deepEqual(Object.keys(body.items[0]).sort(), [
-    "createdAt", "duration", "id", "kind", "mimeType", "originalName", "size", "source", "title",
+    "createdAt", "duration", "folder", "id", "kind", "mimeType", "originalName", "owner", "size", "source", "title",
   ]);
   assert.deepEqual({ source: body.items[0].source, duration: body.items[0].duration }, { source: "upload", duration: null });
 });

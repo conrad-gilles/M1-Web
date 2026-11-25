@@ -6,6 +6,9 @@ import { PlaybackState } from '../../shared/models/playback-state.model';
 import { SYNC_SOCKET_FACTORY, SyncService } from '../../shared/services/sync.service';
 import { FakeSyncSocket } from '../../shared/testing/fake-sync-socket';
 import { LocalFilesService } from '../../shared/services/local-files.service';
+import { RoomSessionService } from '../../shared/services/room-session.service';
+import { P2pService } from '../../shared/p2p/p2p.service';
+import { P2pError } from '../../shared/p2p/p2p-transfer';
 import { SyncPlayerComponent } from './sync-player';
 
 const NOW = 1_000_000;
@@ -15,6 +18,8 @@ const media = (id = 'm1', kind: Media['kind'] = 'audio'): Media => ({
   id,
   source: 'upload',
   duration: null,
+  folder: null,
+  owner: null,
   kind,
   title: `Média ${id}`,
   originalName: `${id}.mp3`,
@@ -95,12 +100,18 @@ describe('SyncPlayerComponent', () => {
         set: (value: never) => (fake[key] = value),
       });
     }
+    // Comme un vrai navigateur : play() et pause() déclenchent les événements
+    // play / pause quand l'état change.
     play = vi.fn(() => {
+      const wasPaused = fake.paused;
       fake.paused = false;
+      if (wasPaused) element.dispatchEvent(new Event('play'));
       return Promise.resolve();
     });
     pause = vi.fn(() => {
+      const wasPlaying = !fake.paused;
       fake.paused = true;
+      if (wasPlaying) element.dispatchEvent(new Event('pause'));
     });
     element.play = play as unknown as HTMLMediaElement['play'];
     element.pause = pause as unknown as HTMLMediaElement['pause'];
@@ -153,6 +164,258 @@ describe('SyncPlayerComponent', () => {
     fixture.destroy();
     http.verify();
     vi.useRealTimers();
+  });
+
+  describe('contrôles natifs du navigateur (aussi en plein écran)', () => {
+    /**
+     * Action de l'utilisateur sur les contrôles natifs : le navigateur change
+     * l'élément et ne signale que l'événement (pas le clic).
+     */
+    const user = (event: 'play' | 'pause' | 'seeked', position?: number) => {
+      if (event === 'play') fake.paused = false;
+      if (event === 'pause') fake.paused = true;
+      if (position !== undefined) fake.currentTime = position;
+      element.dispatchEvent(new Event(event));
+      fixture.detectChanges();
+    };
+    const typed = () => commands() as { type: string; position?: number }[];
+    const sent = (type: string) => typed().filter((command) => command.type === type);
+
+    it('le lecteur affiche les contrôles natifs, pour la vidéo comme pour l’audio', () => {
+      loadMedia(playback(), {}, media('m1', 'video'));
+      expect(host().querySelector('video')?.hasAttribute('controls')).toBe(true);
+
+      receive(playback({ mediaId: 'm2' }));
+      http.expectOne('/api/media/m2/url').flush({ url: '/u2', expiresAt: '', media: media('m2', 'audio') });
+      fixture.detectChanges();
+      expect(host().querySelector('audio')?.hasAttribute('controls')).toBe(true);
+    });
+
+    it('lecture native, salon en pause : tout le salon lit, sans que le lecteur soit remis en pause', () => {
+      loadMedia(playback({ paused: true, position: 30 }), { currentTime: 30 });
+
+      user('play');
+      advance(300);
+
+      expect(typed()).toEqual([{ type: 'play' }]);
+      advance(600);
+      expect(pause).not.toHaveBeenCalled();
+    });
+
+    it('pause native, salon en lecture : tout le salon s’arrête, sans relance entre-temps', () => {
+      loadMedia(playback({ paused: false, position: 30 }), { currentTime: 30 });
+      play.mockClear();
+
+      user('pause');
+      advance(300);
+
+      expect(typed()).toEqual([{ type: 'pause' }]);
+      advance(600);
+      expect(play).not.toHaveBeenCalled();
+    });
+
+    it('le salon répond : la surveillance reprend aussitôt la main', () => {
+      loadMedia(playback({ paused: false, position: 30 }), { currentTime: 30 });
+      user('pause');
+      advance(300);
+
+      receive(playback({ paused: true, position: 30.3, updatedAt: NOW + 300 }));
+
+      expect(fake.paused).toBe(true);
+      expect(typed()).toEqual([{ type: 'pause' }]);
+    });
+
+    it('saut natif : tout le salon se déplace, une seule fois pendant le glissement', () => {
+      loadMedia(playback({ paused: false, position: 10 }), { currentTime: 10 });
+
+      user('seeked', 60);
+      advance(100);
+      user('seeked', 95);
+      advance(300);
+
+      expect(typed()).toEqual([{ type: 'seek', position: 95 }]);
+      // Aucune correction de dérive ne l'a ramené en arrière entre-temps.
+      expect(fake.currentTime).toBe(95);
+    });
+
+    it('Firefox pendant le glissement (pause, saut, relance) : seulement le saut part au salon', () => {
+      loadMedia(playback({ paused: false, position: 10 }), { currentTime: 10 });
+
+      user('pause');
+      user('seeked', 70);
+      user('play');
+      advance(300);
+
+      expect(typed()).toEqual([{ type: 'seek', position: 70 }]);
+    });
+
+    it('les changements faits par le lecteur lui-même ne repartent jamais comme commandes', () => {
+      // Le salon lit : le lecteur se lance lui-même (événement play compris).
+      loadMedia(playback({ paused: false, position: 10 }), { currentTime: 10 });
+      // Dérive de 3 s : le lecteur saute lui-même à la bonne position.
+      fake.currentTime = 7;
+      advance(1000);
+      expect(fake.currentTime).toBeCloseTo(11, 0);
+      element.dispatchEvent(new Event('seeked'));
+      // Le salon passe en pause : le lecteur s'arrête lui-même (événement pause compris).
+      receive(playback({ paused: true, position: 11, updatedAt: NOW + 1000 }));
+      advance(1000);
+
+      expect(commands()).toEqual([]);
+    });
+
+    it('touche multimédia ou casque (pause sans clic sur la page) : c’est aussi l’utilisateur', () => {
+      loadMedia(playback({ paused: false, position: 10 }), { currentTime: 10 });
+
+      user('pause');
+      advance(300);
+
+      expect(sent('pause')).toEqual([{ type: 'pause' }]);
+    });
+
+    it('la pause automatique en fin de média n’est pas une pause du salon', () => {
+      loadMedia(playback({ paused: false, position: 199 }), { currentTime: 200, duration: 200 });
+
+      fake.ended = true;
+      user('pause');
+      advance(300);
+
+      expect(sent('pause')).toEqual([]);
+      expect(sent('seek')).toEqual([]);
+    });
+
+    it('lecture native quand le navigateur bloquait la lecture automatique : vaut le clic demandé', async () => {
+      loadMedia(playback({ paused: true }));
+      play.mockImplementation(() => Promise.reject(new DOMException('bloqué', 'NotAllowedError')));
+      receive(playback({ paused: false, position: 0, updatedAt: NOW }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(component.needsGesture()).toBe(true);
+
+      play.mockImplementation(() => {
+        fake.paused = false;
+        return Promise.resolve();
+      });
+      user('play');
+      advance(300);
+
+      expect(component.needsGesture()).toBe(false);
+      expect(sent('play')).toEqual([]); // le salon lisait déjà
+    });
+
+    it('volume et sourdine changés avec les contrôles natifs : reflétés dans nos réglages', () => {
+      loadMedia();
+
+      fake.volume = 0.3;
+      fake.muted = true;
+      element.dispatchEvent(new Event('volumechange'));
+      fixture.detectChanges();
+
+      expect(component.volume()).toBe(0.3);
+      expect(host().textContent).toContain('Son coupé');
+      expect(commands()).toEqual([]);
+    });
+  });
+
+  describe('partage direct (P2P)', () => {
+    const p2pMedia = (ownerId = 'alex'): Media => ({
+      ...media('p1', 'video'),
+      source: 'p2p',
+      duration: 8,
+      owner: { id: ownerId, name: 'Alex' },
+      title: 'Film en direct',
+    });
+    let p2p: P2pService;
+    let prepare: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      p2p = TestBed.inject(P2pService);
+      prepare = vi.spyOn(p2p, 'prepare');
+      vi.spyOn(p2p, 'forget');
+      vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mon-fichier');
+      vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+      TestBed.inject(RoomSessionService).open({
+        room: { code: 'K7P2QX', participants: [], expiresAt: '2026-11-25T20:00:00.000Z' },
+        participant: { id: 'sam', name: 'Sam' },
+        token: 'jeton',
+      });
+    });
+    afterEach(() => vi.restoreAllMocks());
+
+    const loadP2p = async (item = p2pMedia()) => {
+      receive(playback({ mediaId: 'p1' }));
+      http.expectOne('/api/media/p1/url').flush({ url: null, expiresAt: null, media: item });
+      fixture.detectChanges();
+      await vi.advanceTimersByTimeAsync(0);
+      fixture.detectChanges();
+    };
+
+    it('spectateur : se connecte à celui qui partage, puis lit le flux servi par le service worker', async () => {
+      let resolve!: (url: string) => void;
+      prepare.mockReturnValue(new Promise((r) => (resolve = r)));
+
+      await loadP2p();
+      expect(host().textContent).toContain('Connexion directe à Alex…');
+      expect(host().querySelector('video')).toBeNull();
+
+      resolve('/p2p-stream/p1?page=abc');
+      await vi.advanceTimersByTimeAsync(0);
+      fixture.detectChanges();
+
+      expect(host().querySelector('video')?.getAttribute('src')).toBe('/p2p-stream/p1?page=abc');
+      expect(host().textContent).not.toContain('Connexion directe à Alex…');
+    });
+
+    it.each([
+      ['offline', 'Alex n’est pas connecté', false],
+      ['failed', 'Connexion directe impossible avec Alex', true],
+      ['not-shared', 'Alex ne partage plus ce fichier', true],
+      ['closed', 'Le transfert depuis Alex s’est interrompu', true],
+    ] as const)('échec « %s » : explication claire et bouton Réessayer', async (code, message, forgets) => {
+      prepare.mockRejectedValue(new P2pError(code));
+
+      await loadP2p();
+
+      const alert = host().querySelector('[role="alert"]');
+      expect(alert?.textContent).toContain(message);
+      expect(alert?.querySelector('button')?.textContent).toContain('Réessayer');
+      expect(vi.mocked(p2p.forget).mock.calls.length > 0).toBe(forgets);
+    });
+
+    it('celui qui partage lit son propre fichier, sans connexion', async () => {
+      const file = new File(['x'], 'film.mp4');
+      p2p.share('p1', file);
+
+      await loadP2p(p2pMedia('sam'));
+
+      expect(prepare).not.toHaveBeenCalled();
+      expect(host().querySelector('video')?.getAttribute('src')).toBe('blob:mon-fichier');
+    });
+
+    it('celui qui partage a rechargé la page : il rechoisit son fichier (même durée) et le partage de nouveau', async () => {
+      const probe = vi.spyOn(TestBed.inject(LocalFilesService), 'probe').mockResolvedValue({ duration: 8.3, kind: 'video' });
+
+      await loadP2p(p2pMedia('sam'));
+      expect(host().querySelector('.local-pick')?.textContent).toContain('choisissez de nouveau ce fichier');
+
+      const file = new File(['x'], 'film.mp4');
+      await component.chooseLocalFile({ target: { files: [file], value: 'x' } } as unknown as Event);
+      fixture.detectChanges();
+
+      expect(probe).toHaveBeenCalled();
+      expect(p2p.sharedFile('p1')).toBe(file);
+      expect(host().querySelector('video')?.getAttribute('src')).toBe('blob:mon-fichier');
+    });
+
+    it('flux interrompu pendant la lecture : explication, la connexion est oubliée', async () => {
+      prepare.mockResolvedValue('/p2p-stream/p1?page=abc');
+      await loadP2p();
+
+      host().querySelector('video')!.dispatchEvent(new Event('error'));
+      fixture.detectChanges();
+
+      expect(host().querySelector('[role="alert"]')?.textContent).toContain('Le transfert depuis Alex s’est interrompu');
+      expect(p2p.forget).toHaveBeenCalledWith('alex');
+    });
   });
 
   describe('média local : chacun lit sa propre copie, reconnue à sa durée', () => {
@@ -271,6 +534,91 @@ describe('SyncPlayerComponent', () => {
       expect(localFiles.get('loc')).toBeUndefined();
     });
 
+    describe('fichier d’un dossier local', () => {
+      const inFolderMedia = (): Media => ({
+        ...local(),
+        folder: 'Ma série',
+        originalName: 'Saison 1/ep01.mkv',
+        title: 'ep01.mkv',
+      });
+      const loadFolderMedia = () => {
+        receive(playback({ mediaId: 'loc' }));
+        http.expectOne('/api/media/loc/url').flush({ url: null, expiresAt: null, media: inFolderMedia() });
+        fixture.detectChanges();
+      };
+      const folderFile = (relativePath: string) => {
+        const file = new File(['x'], relativePath.split('/').pop()!, { type: 'video/x-matroska' });
+        Object.defineProperty(file, 'webkitRelativePath', { value: relativePath });
+        return file;
+      };
+      const pickFolder = async (files: File[]) => {
+        await component.chooseLocalFolder({ target: { files, value: 'x' } } as unknown as Event);
+        fixture.detectChanges();
+      };
+
+      it('demande le dossier de même nom, pas un fichier seul', () => {
+        loadFolderMedia();
+
+        const pickBox = host().querySelector('.local-pick')!;
+        expect(pickBox.textContent).toContain('Fichier « Saison 1/ep01.mkv » du dossier « Ma série »');
+        expect(pickBox.querySelector('input')?.hasAttribute('webkitdirectory')).toBe(true);
+      });
+
+      it('refuse un dossier d’un autre nom', async () => {
+        loadFolderMedia();
+
+        await pickFolder([folderFile('Autre/Saison 1/ep01.mkv')]);
+
+        expect(host().querySelector('[role="alert"]')?.textContent).toContain(
+          'Ce dossier s’appelle « Autre », celui du salon « Ma série »',
+        );
+        expect(probe).not.toHaveBeenCalled();
+      });
+
+      it('dossier de même nom sans ce fichier : le dit', async () => {
+        loadFolderMedia();
+
+        await pickFolder([folderFile('Ma série/Saison 1/ep02.mkv')]);
+
+        expect(host().querySelector('[role="alert"]')?.textContent).toContain(
+          'Votre dossier « Ma série » ne contient pas « Saison 1/ep01.mkv »',
+        );
+      });
+
+      it('même chemin mais autre durée : refusé', async () => {
+        loadFolderMedia();
+        probe.mockResolvedValue({ duration: 60, kind: 'video' });
+
+        await pickFolder([folderFile('Ma série/Saison 1/ep01.mkv')]);
+
+        expect(host().querySelector('[role="alert"]')?.textContent).toContain('Ce fichier dure 1:00');
+        expect(host().querySelector('video')).toBeNull();
+      });
+
+      it('même nom de dossier, même chemin, même durée : le fichier est lu et synchronisé', async () => {
+        loadFolderMedia();
+        probe.mockResolvedValue({ duration: 5423.9, kind: 'video' });
+
+        await pickFolder([folderFile('Ma série/Saison 1/ep01.mkv'), folderFile('Ma série/Saison 1/ep02.mkv')]);
+
+        expect(host().querySelector('video')?.getAttribute('src')).toBe('blob:copie-locale');
+        expect(host().querySelector('.local-pick')).toBeNull();
+      });
+
+      it('dossier déjà relié pendant la session (ou ailleurs dans la page) : lu sans rien redemander', async () => {
+        loadFolderMedia();
+        probe.mockResolvedValue({ duration: 5423.48, kind: 'video' });
+
+        // La carte « Synchroniser un fichier local » relie le dossier pendant que le lecteur attend.
+        localFiles.rememberFolder('Ma série', [{ path: 'Saison 1/ep01.mkv', file: folderFile('Ma série/Saison 1/ep01.mkv') }]);
+        fixture.detectChanges();
+        await vi.advanceTimersByTimeAsync(0);
+        fixture.detectChanges();
+
+        expect(host().querySelector('video')?.getAttribute('src')).toBe('blob:copie-locale');
+      });
+    });
+
     it('changer de média libère l’URL du fichier local', async () => {
       loadLocal();
       probe.mockResolvedValue({ duration: 5423.48, kind: 'video' });
@@ -289,7 +637,7 @@ describe('SyncPlayerComponent', () => {
       expect(host().querySelector('audio, video')).toBeNull();
     });
 
-    it('charge l’URL signée du média du salon dans un lecteur sans contrôles natifs', () => {
+    it('charge l’URL signée du média du salon dans un lecteur avec les contrôles natifs', () => {
       const changes: (Media | null)[] = [];
       component.mediaChange.subscribe((value) => changes.push(value));
 
@@ -297,8 +645,8 @@ describe('SyncPlayerComponent', () => {
 
       expect(element.tagName).toBe('AUDIO');
       expect(element.getAttribute('src')).toBe('/api/media/m1/stream?token=t');
-      // Sans `controls`, un clic ne peut pas piloter le lecteur hors du salon.
-      expect(element.hasAttribute('controls')).toBe(false);
+      // Les contrôles natifs pilotent tout le salon (voir « contrôles natifs du navigateur »).
+      expect(element.hasAttribute('controls')).toBe(true);
       expect(host().querySelector('.now-playing')?.textContent).toContain('Média m1');
       expect(changes.map((value) => value?.id)).toEqual(['m1']);
     });
