@@ -6,9 +6,14 @@
         "start": "node --env-file=.env src/server.js",
         "start:local": "node src/server.js",
         "test": "node --test",
+    "check:storage": "node --env-file-if-exists=.env scripts/check-storage.js",
+    "setup:cors": "node --env-file-if-exists=.env scripts/setup-bucket-cors.js",
         "start:memory": "node --env-file-if-exists=.env scripts/start-memory.js"
     },
     "dependencies": {
+        "@aws-sdk/client-s3": "3.1177.0",
+        "@aws-sdk/lib-storage": "3.1177.0",
+        "@aws-sdk/s3-request-presigner": "3.1177.0",
         "cors": "^2.8.5",
         "express": "^5.1.0",
         "jsonwebtoken": "^9.0.2",

@@ -5,6 +5,7 @@ import { Media } from '../../shared/models/media.model';
 import { PlaybackState } from '../../shared/models/playback-state.model';
 import { SYNC_SOCKET_FACTORY, SyncService } from '../../shared/services/sync.service';
 import { FakeSyncSocket } from '../../shared/testing/fake-sync-socket';
+import { LocalFilesService } from '../../shared/services/local-files.service';
 import { SyncPlayerComponent } from './sync-player';
 
 const NOW = 1_000_000;
@@ -12,6 +13,8 @@ const SAM = { id: 'p2', name: 'Sam' };
 
 const media = (id = 'm1', kind: Media['kind'] = 'audio'): Media => ({
   id,
+  source: 'upload',
+  duration: null,
   kind,
   title: `Média ${id}`,
   originalName: `${id}.mp3`,
@@ -152,6 +155,134 @@ describe('SyncPlayerComponent', () => {
     vi.useRealTimers();
   });
 
+  describe('média local : chacun lit sa propre copie, reconnue à sa durée', () => {
+    const local = (): Media => ({
+      ...media('loc', 'video'),
+      source: 'local',
+      duration: 5423.48,
+      title: 'Film du soir',
+    });
+    let probe: ReturnType<typeof vi.spyOn>;
+    let localFiles: LocalFilesService;
+
+    beforeEach(() => {
+      localFiles = TestBed.inject(LocalFilesService);
+      probe = vi.spyOn(localFiles, 'probe');
+      vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:copie-locale');
+      vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    });
+    afterEach(() => vi.restoreAllMocks());
+
+    /** Le salon charge le média local : l'API ne renvoie pas d'URL. */
+    const loadLocal = (state = playback({ mediaId: 'loc' })) => {
+      receive(state);
+      http.expectOne('/api/media/loc/url').flush({ url: null, expiresAt: null, media: local() });
+      fixture.detectChanges();
+    };
+    const pick = async (name: string) => {
+      const input = { files: [new File(['x'], name)], value: name };
+      await component.chooseLocalFile({ target: input } as unknown as Event);
+      fixture.detectChanges();
+      return input;
+    };
+
+    it('demande la copie locale au lieu de télécharger, contrôles du salon toujours là', () => {
+      loadLocal();
+
+      expect(host().querySelector('audio, video')).toBeNull();
+      expect(host().querySelector('.local-pick')?.textContent).toContain('Choisissez votre copie de « Film du soir »');
+      expect(host().querySelector('.local-pick')?.textContent).toContain('durée 1:30:23');
+      expect(host().querySelector('.controls .main')).not.toBeNull();
+      expect(component.duration()).toBe(5423.48);
+    });
+
+    it('refuse une copie dont la durée diffère de plus de 1 s', async () => {
+      loadLocal();
+      probe.mockResolvedValue({ duration: 180, kind: 'audio' });
+
+      const input = await pick('autre.mp3');
+
+      expect(host().querySelector('[role="alert"]')?.textContent).toContain(
+        'Ce fichier dure 3:00, celui du salon 1:30:23',
+      );
+      expect(host().querySelector('audio, video')).toBeNull();
+      expect(localFiles.get('loc')).toBeUndefined();
+      expect(input.value).toBe('');
+    });
+
+    it('refuse un fichier que le navigateur ne sait pas lire', async () => {
+      loadLocal();
+      probe.mockRejectedValue(new Error('Fichier illisible par ce navigateur'));
+
+      await pick('film.avi');
+
+      expect(host().querySelector('[role="alert"]')?.textContent).toContain('ne sait pas lire ce fichier');
+      expect(host().querySelector('audio, video')).toBeNull();
+    });
+
+    it('accepte une copie au nom différent et de même durée, puis suit l’état du salon', async () => {
+      loadLocal(playback({ mediaId: 'loc', paused: true, position: 42 }));
+      probe.mockResolvedValue({ duration: 5424.1, kind: 'video' });
+
+      await pick('Mon film - copie (1080p).mp4');
+
+      const video = host().querySelector('video');
+      expect(video?.getAttribute('src')).toBe('blob:copie-locale');
+      expect(host().querySelector('.local-pick')).toBeNull();
+      expect(localFiles.get('loc')?.file.name).toBe('Mon film - copie (1080p).mp4');
+
+      // Même lecteur et même synchronisation que pour un fichier envoyé.
+      stubElement({ duration: 5424.1 });
+      element.dispatchEvent(new Event('loadedmetadata'));
+      fixture.detectChanges();
+      expect(fake.currentTime).toBe(42);
+      expect(Array.from(host().querySelectorAll('button')).some((b) => b.textContent?.includes('Plein écran'))).toBe(true);
+    });
+
+    it('une copie déjà choisie pendant la session est reprise sans redemander', () => {
+      localFiles.remember('loc', { file: new File(['x'], 'film.mp4'), info: { duration: 5423.48, kind: 'video' } });
+
+      loadLocal();
+
+      expect(host().querySelector('video')?.getAttribute('src')).toBe('blob:copie-locale');
+      expect(host().querySelector('.local-pick')).toBeNull();
+      expect(probe).not.toHaveBeenCalled();
+    });
+
+    it('une copie audio d’un média vidéo est lue dans un lecteur audio', async () => {
+      loadLocal();
+      probe.mockResolvedValue({ duration: 5423.48, kind: 'audio' });
+
+      await pick('bande-son.mp3');
+
+      expect(host().querySelector('audio')?.getAttribute('src')).toBe('blob:copie-locale');
+      expect(host().querySelector('video')).toBeNull();
+    });
+
+    it('si la copie se révèle illisible : message, et elle est oubliée', async () => {
+      loadLocal();
+      probe.mockResolvedValue({ duration: 5423.48, kind: 'video' });
+      await pick('film.mp4');
+
+      host().querySelector('video')!.dispatchEvent(new Event('error'));
+      fixture.detectChanges();
+
+      expect(host().querySelector('[role="alert"]')?.textContent).toContain('ne parvient pas à lire ce fichier local');
+      expect(localFiles.get('loc')).toBeUndefined();
+    });
+
+    it('changer de média libère l’URL du fichier local', async () => {
+      loadLocal();
+      probe.mockResolvedValue({ duration: 5423.48, kind: 'video' });
+      await pick('film.mp4');
+
+      receive(playback({ mediaId: 'm2' }));
+      http.expectOne('/api/media/m2/url').flush({ url: '/u2', expiresAt: '', media: media('m2') });
+
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:copie-locale');
+    });
+  });
+
   describe('chargement du média', () => {
     it('invite à choisir un média tant que le salon n’en a pas', () => {
       expect(host().textContent).toContain('Choisissez un média ci-dessous');
@@ -227,13 +358,39 @@ describe('SyncPlayerComponent', () => {
       expect(host().querySelector('audio')).not.toBeNull();
     });
 
-    it('signale un média temporairement indisponible quand le lecteur échoue', () => {
-      loadMedia();
+    describe('erreur du lecteur : la cause est lue dans le code HTTP de l’URL', () => {
+      const failWith = async (response: Promise<Response>) => {
+        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockReturnValue(response);
+        loadMedia();
+        element.dispatchEvent(new Event('error'));
+        await vi.advanceTimersByTimeAsync(0); // laisse la réponse de fetch arriver
+        fixture.detectChanges();
+        const calls = [...fetchSpy.mock.calls]; // mockRestore efface les appels enregistrés
+        fetchSpy.mockRestore();
+        return { calls, alert: host().querySelector('[role="alert"]')?.textContent ?? '' };
+      };
 
-      element.dispatchEvent(new Event('error'));
-      fixture.detectChanges();
+      it('quota gratuit du jour atteint (403)', async () => {
+        const { calls, alert } = await failWith(Promise.resolve(new Response(null, { status: 403 })));
 
-      expect(host().querySelector('[role="alert"]')?.textContent).toContain('Média temporairement indisponible');
+        expect(calls).toEqual([['/api/media/m1/stream?token=t', { headers: { Range: 'bytes=0-0' } }]]);
+        expect(alert).toContain('Quota gratuit de lecture du jour atteint');
+      });
+
+      it('lien expiré (401)', async () => {
+        const { alert } = await failWith(Promise.resolve(new Response(null, { status: 401 })));
+        expect(alert).toContain('Le lien de lecture a expiré');
+      });
+
+      it('média supprimé (404)', async () => {
+        const { alert } = await failWith(Promise.resolve(new Response(null, { status: 404 })));
+        expect(alert).toContain("Ce média n'existe plus");
+      });
+
+      it('autre cause ou réseau coupé : message générique', async () => {
+        const { alert } = await failWith(Promise.reject(new TypeError('Failed to fetch')));
+        expect(alert).toContain('Média temporairement indisponible');
+      });
     });
   });
 

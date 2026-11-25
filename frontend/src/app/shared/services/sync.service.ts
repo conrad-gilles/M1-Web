@@ -1,6 +1,7 @@
 import { Injectable, InjectionToken, computed, inject, signal } from '@angular/core';
 import { Subject } from 'rxjs';
 import { io } from 'socket.io-client';
+import { I18nService } from '../i18n/i18n.service';
 import { Participant } from '../models/participant.model';
 import { PlaybackChange } from '../models/playback-change.model';
 import { CommandResult, PlaybackCommand } from '../models/playback-command.model';
@@ -51,6 +52,7 @@ export type RoomClosedReason = 'closed' | 'left' | 'expired' | 'refused';
 @Injectable({ providedIn: 'root' })
 export class SyncService {
   private readonly createSocket = inject(SYNC_SOCKET_FACTORY);
+  private readonly i18n = inject(I18nService);
   private socket: SyncSocket | null = null;
   private version = -1;
 
@@ -140,7 +142,7 @@ export class SyncService {
   send(command: PlaybackCommand): Promise<CommandResult> {
     const socket = this.socket;
     if (!socket || !this.online()) {
-      return Promise.resolve({ ok: false, message: 'Connexion au salon perdue, nouvelle tentative…' });
+      return Promise.resolve({ ok: false, message: this.i18n.t('sync.connectionLost') });
     }
     return new Promise((resolve) =>
       socket.emit('playback:command', command, (result: CommandResult) => {

@@ -127,4 +127,4 @@ http://localhost:4200
 | Backend: `Échec de connexion à MongoDB` (MongoDB connection failed) | Wrong URI/password, or IP not allowed | Check `backend/.env`, check Atlas → Network Access → IP Access List |
 | Blank page or CORS/404 errors on `/api/...` | Backend not started, or `proxy.conf.json` misconfigured | Check that the backend is running on port 3000 and that `frontend/proxy.conf.json` points to `http://localhost:3000` |
 | Sent back to the home page with "Ce salon a été fermé ou a expiré" | The room was closed by its host, expired after 24 h without activity, or the room token expired | Create a new room or join again with the code |
-| Upload rejected with an error message | Unsupported format (only MP3, WAV, OGG, M4A) or file > 25 MB | Check the file you are using, try the ones in `frontend/fichiers-audio-de-test/` |
+| Upload rejected with an error message | Unsupported format (audio: MP3, WAV, OGG, M4A; video: MP4, WebM, OGV, plus MOV/AVI/MKV converted in the browser), or storage full (`507`) | Check the file you are using, try the ones in `frontend/fichiers-audio-de-test/` and `e2e/fixtures/`; if storage is full, delete media |

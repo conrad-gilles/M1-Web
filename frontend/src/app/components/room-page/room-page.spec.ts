@@ -38,6 +38,8 @@ const room = (code = 'K7P2QX'): Room => ({
 
 const media = (id: string, kind: Media['kind'] = 'audio'): Media => ({
   id,
+  source: 'upload',
+  duration: null,
   kind,
   title: `Média ${id}`,
   originalName: `${id}.mp3`,

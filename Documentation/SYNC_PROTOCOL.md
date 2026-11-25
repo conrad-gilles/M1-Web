@@ -75,7 +75,7 @@ Commandes :
 
 | Commande | Effet |
 |---|---|
-| `{ type: "load", mediaId }` | Charge un média du salon, en pause à 0 s. Refusée (`Média inconnu`) si le média n'appartient pas au salon. |
+| `{ type: "load", mediaId }` | Charge un média du salon, en pause à 0 s. Refusée (`Média inconnu`) si le média n'appartient pas au salon. Un média local (`source: "local"`) se charge de la même façon : le protocole ne change pas, chaque participant applique l'état à sa propre copie dès qu'il l'a choisie. Tant qu'il ne l'a pas choisie, il n'a pas de lecteur, ne signale aucun blocage et ne retient donc pas le salon ; il rejoint la position partagée en choisissant son fichier. |
 | `{ type: "play" }` | Lecture à partir de la position courante. |
 | `{ type: "pause" }` | Pause à la position attendue à l'heure du serveur. |
 | `{ type: "seek", position }` | Déplace tout le salon. L'état lecture/pause est conservé. Refusée (`Position invalide`) si `position` n'est pas un nombre fini positif. |

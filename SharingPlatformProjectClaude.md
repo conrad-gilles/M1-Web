@@ -503,11 +503,13 @@ for demos of phases 3.1 to 3.3; if it becomes annoying, do phase 3.4 earlier.
 | Forwarded playback URLs | Accepted for now (§8). |
 | Sync tolerance | **0.5 s** between participants. |
 | P2P file matching | **Very loose at first:** same duration and same file type only (§6). |
+| Interface language | **French and English** (November 2026): the browser's language on the first visit (English unless it is French), then the user's FR / EN choice, remembered. Runtime translation in the frontend; the backend keeps French messages, translated on display. |
+| Local file matching (server version) | **Same duration only, within 1 s** (November 2026): name, size and format may differ. Local files are a separate option next to uploads, played by the same room player and synced over the same Socket.IO protocol. |
 | Accounts | **None, in both versions.** The host shares a simple room code; others join with it and a display name (§4). |
 | Seeking | **When one person seeks, everyone follows**, with a notice showing who did it (§5 rule 7). |
 | P2P architecture | **Completely serverless** in the future: no server run by the project (§4). |
 | Formats | Browser-native formats on the server; **MOV, AVI and MKV converted to MP4 in the uploader's browser** with `ffmpeg.wasm`, not on the server, to stay on Render's free tier (§6). |
-| Size limits | **The server keeps a hard limit** (25 MB per file today) because it protects the shared free storage. **Limits that only protect the user's own device are recommendations:** a MOV/AVI/MKV over 200 MB shows a warning but can still be converted. |
+| Size limits | **No per-file limit, only warnings** (decided November 2026): from 1 GB (B2's free daily download allowance), and above 200 MB for a MOV/AVI/MKV converted on the user's device. The real limit is the free storage: when it is full the upload fails with a clear `507`, and when the daily download allowance is used up the player says so (B2 answers `403`). |
 | Self-hosting | **None for now.** Users do not host anything; everything the project hosts runs on free services (§2). |
 | Free limit reached (B2, Atlas, Render) | **Do nothing, or show an error message.** Never pay (§2). |
 | Copyright | **Nothing for now**, the project is too small (§8). |
@@ -534,8 +536,11 @@ for demos of phases 3.1 to 3.3; if it becomes annoying, do phase 3.4 earlier.
 ## 11.1 Implementation status (branch `reese`, November 2026)
 
 Phases 3.1, 3.2 and 3.3 are implemented, together with the two backend changes of step 1 (§7.2) and
-the CI workflow of step 2. The account setup (Render, Atlas production database, Backblaze B2, branch
-protection) is still to do, as are phases 3.4 to 3.7.
+the CI workflow of step 2. **Phase 3.4 is implemented (November 2026, branch `sharing-platform-gilles`):**
+the B2 bucket (`sharing-platform-media`, EU region) exists and the app uses it whenever the `S3_*`
+variables are set; the round trip was checked against the real bucket. Still to do for 3.4: add the
+five `S3_*` variables on Render. Phases 3.5 to 3.7 are partly done (video types, in-browser conversion,
+see below).
 
 | Item | Where |
 |---|---|
@@ -546,8 +551,11 @@ protection) is still to do, as are phases 3.4 to 3.7.
 | 3.3 Socket.IO, room state, buffering rules | `backend/src/realtime.js`, `backend/src/sync/` |
 | 3.3 Clock offset, drift correction, synced player, notices | `frontend/src/app/shared/sync/`, `shared/services/sync.service.ts`, `components/sync-player/` |
 | HTTP contract, WebSocket protocol | `Documentation/API_CONTRACT.md`, `Documentation/SYNC_PROTOCOL.md` |
+| 3.4 B2 storage: S3 module (multipart upload from the temp file, presigned GET URLs capped at 7 days, delete of every version so hidden files stop counting), chosen when the five `S3_*` variables are set; `npm run check:storage` (real round trip) and `npm run setup:cors` (read-only CORS for the app's origins) | `backend/src/storage/s3Storage.js`, `backend/src/storage/index.js`, `backend/scripts/` |
 | 3.5 (part) Video types: MP4, WebM, OGV accepted, `kind: "video"`, `<video>` player with full screen | `backend/src/config.js`, `components/media-library/`, `components/sync-player/` |
 | 3.7 (early) MOV/AVI/MKV converted to MP4 in the browser (`ffmpeg.wasm`, loaded only when needed) | `frontend/src/app/shared/video/`, `shared/services/video-converter.service.ts`, `frontend/angular.json` (assets) |
+| Local files synced without upload (a server-assisted step towards 3.6): `POST /api/media/local` stores only title, duration and type (`source: "local"`); the room player asks each participant for their own copy, accepted when its duration matches within 1 s, then plays it from a `blob:` URL with the usual sync | `backend/src/routes/mediaRoutes.js`, `backend/src/models/Media.js`, `components/local-media/`, `components/sync-player/`, `shared/local-media/`, `shared/services/local-files.service.ts`, `e2e/tests/local.spec.js` |
+| French / English interface: `I18nService` (signal-based, `t('key')` in templates), dictionaries with a compile-time check that every French key has an English text, translation of the backend's French messages, FR / EN switch in the header | `frontend/src/app/shared/i18n/`, `components/app/`, `e2e/tests/langue.spec.js` |
 | End-to-end video tests and their clips | `e2e/tests/video.spec.js`, `e2e/fixtures/` |
 
 Choices made while implementing, to review:
@@ -568,9 +576,11 @@ Choices made while implementing, to review:
 - **Loading a media leaves it paused at 0 s**; anyone then presses play.
 - **During a buffering wait:** pause cancels the automatic resume, play resumes at once, seek keeps
   waiting (§5 rule 5 did not say).
-- **Video is accepted, still with the 25 MB limit** (a few minutes of video). Still missing from phase
-  3.5: direct upload to B2 with presigned URLs for large files, a higher video limit, and the
-  magic-byte check.
+- **Video is accepted, with no per-file size limit** (§10): warning from 1 GB, `507` when storage is
+  full (`backend/src/storage/errors.js`), and the player explains a `403` as the daily free download
+  allowance. Still missing from phase 3.5: direct upload to B2 with presigned URLs (today every upload
+  goes through Node: Multer writes it to Render's small disk, then it is sent to B2 and deleted, so a
+  very large file can still fill that disk during the upload), and the magic-byte check.
 - **In-browser conversion (MOV/AVI/MKV):**
   - Tracks that browsers already play (H.264 video, AAC or MP3 audio) are copied into an MP4 in about a
     second. Anything else is re-encoded to H.264/AAC (`ultrafast` preset), which is slower, especially
@@ -579,7 +589,7 @@ Choices made while implementing, to review:
     uploads one of these formats; other users never load it. The single-threaded build is used so no
     COOP/COEP headers are needed.
   - Above 200 MB, a warning explains that the conversion may be very slow or run out of memory, but the
-    upload is not blocked (§10). The converted file must still fit the server's 25 MB limit.
+    upload is not blocked (§10).
   - The converted file is uploaded as `name.mp4`, so the library shows `.mp4` as the original name.
 - **Existing data:** tracks and users created before these phases stay in their old MongoDB
   collections and are no longer read.

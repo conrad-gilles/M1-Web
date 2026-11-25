@@ -7,6 +7,7 @@ import {
   newPerson,
   playButton,
   player,
+  uploadCard,
   uploadSong,
   waitForPlayer,
 } from "./helpers.js";
@@ -34,9 +35,10 @@ function watchConverterDownload(page) {
 }
 
 async function uploadVideo(page, file, title) {
-  await page.getByRole("textbox", { name: "Titre" }).fill(title);
-  await page.locator('input[type="file"]').setInputFiles(clip(file));
-  await page.getByRole("button", { name: "Envoyer" }).click();
+  const card = uploadCard(page);
+  await card.getByRole("textbox", { name: "Titre" }).fill(title);
+  await card.locator('input[type="file"]').setInputFiles(clip(file));
+  await card.getByRole("button", { name: "Envoyer" }).click();
   // La conversion d'une vidéo réencodée peut prendre quelques secondes.
   await expect(page.locator(".media-card", { hasText: title })).toBeVisible({ timeout: 60_000 });
 }

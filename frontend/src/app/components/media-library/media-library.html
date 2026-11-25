@@ -1,80 +1,85 @@
 <section>
   <div class="grid">
-    <article class="card">
-      <h2>Ajouter un média</h2>
+    <div class="column">
+      <article class="card">
+        <h2>{{ t('upload.title') }}</h2>
 
-      <label>Titre<input [formControl]="title" /></label>
-      <label>
-        Fichier audio ou vidéo
-        <input
-          #fileInput
-          type="file"
-          accept="audio/*,video/*,.mov,.avi,.mkv"
-          [disabled]="busy()"
-          (change)="choose($event)"
-          [attr.aria-describedby]="fileError() ? 'file-error' : null"
-        />
-      </label>
+        <label>{{ t('upload.titleField') }}<input [formControl]="title" /></label>
+        <label>
+          {{ t('upload.file') }}
+          <input
+            #fileInput
+            type="file"
+            accept="audio/*,video/*,.mov,.avi,.mkv"
+            [disabled]="busy()"
+            (change)="choose($event)"
+            [attr.aria-describedby]="fileError() ? 'file-error' : null"
+          />
+        </label>
 
-      @if (fileError()) {
-        <p id="file-error" class="message error" role="alert">{{ fileError() }}</p>
-      }
-      @if (fileWarning() && !busy()) {
-        <p class="message warning" role="status">{{ fileWarning() }}</p>
-      }
-
-      <button type="button" (click)="upload()" [disabled]="!file || busy()">
-        {{ converting() ? 'Conversion en cours…' : uploading() ? 'Envoi en cours…' : 'Envoyer' }}
-      </button>
-
-      @if (busy()) {
-        <p class="message loading" role="status">
-          @if (converting()) {
-            Conversion de la vidéo en MP4 sur votre appareil…
-            {{ uploadPercent() === null ? '(chargement du convertisseur, environ 30 Mo la première fois)' : '' }}
-          } @else {
-            Envoi du fichier, veuillez patienter…
-          }
-        </p>
-        <!-- Sans attribut value, <progress> est indéterminée (taille totale inconnue). -->
-        <progress
-          [attr.value]="uploadPercent()"
-          max="100"
-          aria-label="Progression de l'envoi"
-          [attr.aria-valuetext]="uploadPercent() === null ? 'Envoi en cours' : uploadPercent() + ' %'"
-        ></progress>
-        @if (uploadPercent() !== null) {
-          <small>{{ uploadPercent() }} %</small>
+        @if (fileError()) {
+          <p id="file-error" class="message error" role="alert">{{ fileError() }}</p>
         }
-      }
-      @if (uploadError()) {
-        <p class="message error" role="alert">{{ uploadError() }}</p>
-      }
-      @if (uploadSuccess()) {
-        <p class="message success" role="status">{{ uploadSuccess() }}</p>
-      }
-    </article>
+        @if (fileWarning() && !busy()) {
+          <p class="message warning" role="status">{{ fileWarning() }}</p>
+        }
+
+        <button type="button" (click)="upload()" [disabled]="!file || busy()">
+          {{ converting() ? t('upload.converting') : uploading() ? t('upload.sending') : t('upload.send') }}
+        </button>
+
+        @if (busy()) {
+          <p class="message loading" role="status">
+            @if (converting()) {
+              {{ t('upload.convertingInfo') }}
+              {{ uploadPercent() === null ? t('upload.loadingConverter') : '' }}
+            } @else {
+              {{ t('upload.sendingInfo') }}
+            }
+          </p>
+          <!-- Sans attribut value, <progress> est indéterminée (taille totale inconnue). -->
+          <progress
+            [attr.value]="uploadPercent()"
+            max="100"
+            [attr.aria-label]="t('upload.progress')"
+            [attr.aria-valuetext]="uploadPercent() === null ? t('upload.sending') : uploadPercent() + ' %'"
+          ></progress>
+          @if (uploadPercent() !== null) {
+            <small>{{ uploadPercent() }} %</small>
+          }
+        }
+        @if (uploadError()) {
+          <p class="message error" role="alert">{{ server(uploadError()) }}</p>
+        }
+        @if (uploadSuccess()) {
+          <p class="message success" role="status">{{ uploadSuccess() }}</p>
+        }
+      </article>
+
+      <!-- Fonction distincte de l'upload : le fichier n'est jamais envoyé. -->
+      <app-local-media (declared)="onLocalDeclared()" />
+    </div>
 
     <article class="card">
       <div class="row">
-        <h2>Médias du salon</h2>
-        <button type="button" (click)="load()" [disabled]="loading()">Actualiser</button>
+        <h2>{{ t('library.title') }}</h2>
+        <button type="button" (click)="load()" [disabled]="loading()">{{ t('library.refresh') }}</button>
       </div>
 
       @if (loading()) {
-        <p class="message loading" role="status">Chargement…</p>
+        <p class="message loading" role="status">{{ t('library.loading') }}</p>
       }
       @if (listError()) {
-        <p class="message error" role="alert">{{ listError() }}</p>
+        <p class="message error" role="alert">{{ server(listError()) }}</p>
       }
 
       <label>
-        Filtrer par titre (page affichée)
+        {{ t('library.filter') }}
         <input
           type="search"
           [value]="filterText()"
           (input)="filterText.set($any($event.target).value)"
-          placeholder="Rechercher un titre…"
+          [placeholder]="t('library.search')"
         />
       </label>
 
@@ -83,39 +88,58 @@
           <div class="media-card" [class.playing]="activeMediaId() === track.id">
             <div class="media-info">
               <b>{{ track.title }}</b>
-              <small>{{ track.originalName }}</small>
-              <small
-                >{{ formatMimeType(track.mimeType) }} · {{ formatSize(track.size) }} · ajouté le
-                {{ formatDate(track.createdAt) }}</small
-              >
+              @if (track.source === 'local') {
+                <span class="badge local">{{ t('library.localBadge') }}</span>
+                <small
+                  >{{ track.kind === 'video' ? t('library.video') : t('library.audio') }} ·
+                  {{ t('library.duration', { duration: formatDuration(track.duration ?? 0) }) }} ·
+                  {{ t('library.added', { date: formatDate(track.createdAt) }) }}</small
+                >
+              } @else {
+                <small>{{ track.originalName }}</small>
+                <small
+                  >{{ formatMimeType(track.mimeType) }} · {{ formatSize(track.size) }} ·
+                  {{ t('library.added', { date: formatDate(track.createdAt) }) }}</small
+                >
+              }
               @if (activeMediaId() === track.id) {
-                <span class="badge" role="status">Dans le lecteur</span>
+                <span class="badge" role="status">{{ t('library.inPlayer') }}</span>
               }
             </div>
             <div class="media-actions">
-              <button type="button" (click)="choosePlayback(track)" [attr.aria-label]="'Lire ' + track.title">▶</button>
+              <button
+                type="button"
+                (click)="choosePlayback(track)"
+                [attr.aria-label]="t('library.play', { title: track.title })"
+              >
+                ▶
+              </button>
               <button
                 type="button"
                 class="danger"
                 (click)="remove(track)"
                 [disabled]="deletingId() !== null"
-                [attr.aria-label]="'Supprimer ' + track.title"
+                [attr.aria-label]="t('library.deleteTitle', { title: track.title })"
               >
-                {{ deletingId() === track.id ? 'Suppression…' : 'Supprimer' }}
+                {{ deletingId() === track.id ? t('library.deleting') : t('library.delete') }}
               </button>
             </div>
           </div>
         } @empty {
           @if (!loading()) {
-            <p>{{ filterText().trim() ? 'Aucun média ne correspond à ce filtre sur cette page.' : 'Aucun média pour l’instant : ajoutez-en un.' }}</p>
+            <p>{{ filterText().trim() ? t('library.noMatch') : t('library.empty') }}</p>
           }
         }
       </div>
 
-      <nav class="pager" aria-label="Navigation entre les pages des médias">
-        <button type="button" (click)="go(page() - 1)" [disabled]="isFirstPage() || loading()">Précédent</button>
-        <span aria-live="polite">Page {{ page() }} / {{ pages() }}</span>
-        <button type="button" (click)="go(page() + 1)" [disabled]="isLastPage() || loading()">Suivant</button>
+      <nav class="pager" [attr.aria-label]="t('library.pager')">
+        <button type="button" (click)="go(page() - 1)" [disabled]="isFirstPage() || loading()">
+          {{ t('library.previous') }}
+        </button>
+        <span aria-live="polite">{{ t('library.page', { page: page(), pages: pages() }) }}</span>
+        <button type="button" (click)="go(page() + 1)" [disabled]="isLastPage() || loading()">
+          {{ t('library.next') }}
+        </button>
       </nav>
     </article>
   </div>

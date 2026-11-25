@@ -6,6 +6,9 @@ import { Media } from '../../shared/models/media.model';
 import { UploadState } from '../../shared/models/upload-state.model';
 import { MediaService } from '../../shared/services/media.service';
 import { VideoConverterService } from '../../shared/services/video-converter.service';
+import { formatDuration } from '../../shared/local-media/local-media';
+import { I18nService } from '../../shared/i18n/i18n.service';
+import { LocalMediaComponent } from '../local-media/local-media';
 import {
   RECOMMENDED_CONVERSION_INPUT_SIZE,
   fileExtension,
@@ -35,7 +38,12 @@ const ACCEPTED_MIME_TYPES = new Set([
  * retombe alors sur l'extension du nom de fichier. */
 const ACCEPTED_EXTENSIONS = new Set(['.mp3', '.wav', '.ogg', '.m4a', '.mp4', '.webm', '.ogv']);
 
-const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25 Mo, identique au backend.
+/**
+ * Pas de limite de taille, seulement un avertissement : le stockage gratuit
+ * (Backblaze B2) permet 1 Go de téléchargement par jour pour tout le monde, et
+ * chaque participant télécharge le fichier entier.
+ */
+const LARGE_FILE_WARNING_SIZE = 1024 * 1024 * 1024;
 
 /** Durée d'affichage des notifications SnackBar, en millisecondes. */
 const SNACKBAR_DURATION = 5000;
@@ -43,7 +51,7 @@ const SNACKBAR_DURATION = 5000;
 /** Upload, paginated list and deletion of the media files of a room. */
 @Component({
   selector: 'app-media-library',
-  imports: [ReactiveFormsModule],
+  imports: [ReactiveFormsModule, LocalMediaComponent],
   templateUrl: './media-library.html',
   styleUrl: './media-library.css',
 })
@@ -51,6 +59,9 @@ export class MediaLibraryComponent {
   private readonly service = inject(MediaService);
   private readonly snackBar = inject(MatSnackBar);
   private readonly converter = inject(VideoConverterService);
+  private readonly i18n = inject(I18nService);
+  readonly t = this.i18n.t;
+  readonly server = this.i18n.server;
 
   /** Média actuellement chargé dans le lecteur du salon, pour le mettre en évidence. */
   readonly activeMediaId = input<string | null>(null);
@@ -103,7 +114,7 @@ export class MediaLibraryComponent {
   });
   readonly uploadSuccess = computed(() => {
     const state = this.uploadState();
-    return state.status === 'success' ? `« ${state.title} » a été ajouté au salon.` : '';
+    return state.status === 'success' ? this.t('upload.success', { title: state.title }) : '';
   });
 
   // --- Suppression -----------------------------------------------------------
@@ -147,31 +158,30 @@ export class MediaLibraryComponent {
    * backend/src/middleware/upload.js) car le frontend peut être contourné.
    */
   private validateFile(file: File): string | null {
-    // MOV/AVI/MKV : converti en MP4 avant l'envoi. La limite de 25 Mo
-    // s'applique au résultat, vérifié après la conversion ; la taille du
-    // fichier source ne donne lieu qu'à un avertissement (voir warnAbout).
+    // MOV/AVI/MKV : converti en MP4 avant l'envoi. Aucune taille n'est
+    // interdite : les gros fichiers donnent seulement un avertissement (warnAbout).
     if (needsConversion(file)) return null;
 
     const typeKnown = ACCEPTED_MIME_TYPES.has(file.type);
     const extensionKnown = ACCEPTED_EXTENSIONS.has(fileExtension(file.name));
 
     if (!typeKnown && !extensionKnown) {
-      return 'Format non supporté. Formats acceptés : MP3, WAV, OGG, M4A (audio), MP4, WebM, OGV, MOV, AVI, MKV (vidéo).';
-    }
-    if (file.size > MAX_FILE_SIZE) {
-      return `Fichier trop volumineux (${this.formatSize(file.size)}). Taille maximale : 25 Mo.`;
+      return this.t('upload.unsupported');
     }
     return null;
   }
 
-  /** Recommandation, pas une interdiction : l'utilisateur décide d'essayer. */
+  /** Recommandations, pas des interdictions : l'utilisateur décide d'essayer. */
   private warnAbout(file: File): string {
-    if (!needsConversion(file) || file.size <= RECOMMENDED_CONVERSION_INPUT_SIZE) return '';
-    return (
-      `Fichier volumineux (${this.formatSize(file.size)}, 200 Mo recommandés au plus). ` +
-      'La conversion se fait sur votre appareil : elle peut être très lente, voire échouer ' +
-      'par manque de mémoire, surtout sur téléphone. Le résultat doit aussi faire 25 Mo au plus.'
-    );
+    const warnings: string[] = [];
+    const size = this.formatSize(file.size);
+    if (needsConversion(file) && file.size > RECOMMENDED_CONVERSION_INPUT_SIZE) {
+      warnings.push(this.t('upload.warnConversion', { size }));
+    }
+    if (file.size >= LARGE_FILE_WARNING_SIZE) {
+      warnings.push(this.t('upload.warnLarge', { size }));
+    }
+    return warnings.join(' ');
   }
 
   // --- Bibliothèque paginée ------------------------------------------------
@@ -202,7 +212,7 @@ export class MediaLibraryComponent {
       },
       error: (error: HttpErrorResponse) => {
         console.error('[MediaLibrary] Chargement impossible', error.status);
-        this.listError.set(this.extractErrorMessage(error, 'Impossible de charger la bibliothèque.'));
+        this.listError.set(this.extractErrorMessage(error, this.t('library.loadFailed')));
         this.loading.set(false);
       },
     });
@@ -254,20 +264,12 @@ export class MediaLibraryComponent {
       this.title.enable();
       this.uploadState.set({
         status: 'error',
-        message: 'Conversion impossible : ce fichier vidéo est illisible ou utilise un format non pris en charge.',
+        message: this.t('upload.conversionFailed'),
       });
       return;
     }
 
     console.debug('[MediaLibrary] Vidéo convertie', file.size, '->', converted.size);
-    if (converted.size > MAX_FILE_SIZE) {
-      this.title.enable();
-      this.uploadState.set({
-        status: 'error',
-        message: `Vidéo convertie trop volumineuse (${this.formatSize(converted.size)}). Taille maximale : 25 Mo.`,
-      });
-      return;
-    }
     this.send(converted, title);
   }
 
@@ -302,11 +304,19 @@ export class MediaLibraryComponent {
         this.title.enable();
         this.uploadState.set({
           status: 'error',
-          message: this.extractErrorMessage(error, "Échec de l'envoi du fichier."),
+          message: this.extractErrorMessage(error, this.t('upload.failed')),
         });
       },
     });
   }
+
+  /** Un média local vient d'être ajouté : il apparaît en tête de la première page. */
+  onLocalDeclared(): void {
+    this.page.set(1);
+    this.load();
+  }
+
+  formatDuration = formatDuration;
 
   // --- Lecture -----------------------------------------------------------
 
@@ -333,7 +343,7 @@ export class MediaLibraryComponent {
   remove(track: Media): void {
     // Empêche les doubles clics pendant qu'une suppression est en cours.
     if (this.deletingId()) return;
-    if (!confirm(`Supprimer « ${track.title} » pour tout le salon ?`)) return;
+    if (!confirm(this.t('library.confirmDelete', { title: track.title }))) return;
 
     this.deletingId.set(track.id);
 
@@ -342,7 +352,7 @@ export class MediaLibraryComponent {
         console.debug('[MediaLibrary] Piste supprimée', track.id);
         this.deletingId.set(null);
         this.removed.emit(track);
-        this.notify(`« ${track.title} » a été supprimé.`);
+        this.notify(this.t('library.deleted', { title: track.title }));
         this.load();
       },
       error: (error: HttpErrorResponse) => {
@@ -350,24 +360,25 @@ export class MediaLibraryComponent {
         this.deletingId.set(null);
         if (error.status === 404) {
           this.removed.emit(track);
-          this.notify("Ce média n'existe plus. La liste a été mise à jour.");
+          this.notify(this.t('library.gone'));
           this.load();
           return;
         }
-        this.notify(this.extractErrorMessage(error, 'Impossible de supprimer ce média.'));
+        this.notify(this.extractErrorMessage(error, this.t('library.deleteFailed')));
       },
     });
   }
 
   private notify(message: string): void {
-    this.snackBar.open(message, 'OK', { duration: SNACKBAR_DURATION });
+    // Un message du serveur (en français) est traduit ; les autres le sont déjà.
+    this.snackBar.open(this.server(message), 'OK', { duration: SNACKBAR_DURATION });
   }
 
   // --- Formatage pour l'affichage ----------------------------------------
 
   formatSize(bytes: number): string {
-    if (bytes < 1024) return `${bytes} o`;
-    const units = ['Ko', 'Mo', 'Go'];
+    if (bytes < 1024) return this.t('size.bytes', { n: bytes });
+    const units = this.t('size.units').split(',');
     let value = bytes / 1024;
     let unitIndex = 0;
     while (value >= 1024 && unitIndex < units.length - 1) {
@@ -378,7 +389,7 @@ export class MediaLibraryComponent {
   }
 
   formatDate(iso: string): string {
-    return new Date(iso).toLocaleDateString('fr-FR', {
+    return new Date(iso).toLocaleDateString(this.i18n.locale(), {
       year: 'numeric',
       month: 'short',
       day: 'numeric',

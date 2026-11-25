@@ -35,11 +35,19 @@ export async function joinRoom(page, code, name = "Sam") {
 export const joinError = (page) =>
   page.getByRole("article").filter({ hasText: "Rejoindre un salon" }).locator(".message.error");
 
+/**
+ * Carte « Ajouter un média » (upload). La carte « Synchroniser un fichier
+ * local » a aussi un champ Titre et un champ fichier : on vise donc la bonne.
+ */
+export const uploadCard = (page) =>
+  page.locator("article", { has: page.getByRole("heading", { name: "Ajouter un média" }) });
+
 /** Ajoute le MP3 de test au salon. */
 export async function uploadSong(page, title = "Song 1") {
-  await page.getByRole("textbox", { name: "Titre" }).fill(title);
-  await page.locator('input[type="file"]').setInputFiles(SONG);
-  await page.getByRole("button", { name: "Envoyer" }).click();
+  const card = uploadCard(page);
+  await card.getByRole("textbox", { name: "Titre" }).fill(title);
+  await card.locator('input[type="file"]').setInputFiles(SONG);
+  await card.getByRole("button", { name: "Envoyer" }).click();
   await expect(page.locator(".media-card", { hasText: title })).toBeVisible();
 }
 

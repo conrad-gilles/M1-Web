@@ -1,30 +1,30 @@
 <section>
   <div class="hero">
-    <p class="eyebrow">CODE DU SALON</p>
-    <h1 class="code" aria-label="Code du salon">{{ code() }}</h1>
-    <p>Partagez ce code ou le lien : toute personne qui l’a peut rejoindre le salon.</p>
+    <p class="eyebrow">{{ t('room.eyebrow') }}</p>
+    <h1 class="code" [attr.aria-label]="t('room.codeLabel')">{{ code() }}</h1>
+    <p>{{ t('room.share') }}</p>
     <div class="actions">
-      <button type="button" (click)="copyLink()">Copier le lien</button>
-      <button type="button" (click)="leave()" [disabled]="busy()">Quitter</button>
+      <button type="button" (click)="copyLink()">{{ t('room.copyLink') }}</button>
+      <button type="button" (click)="leave()" [disabled]="busy()">{{ t('room.leave') }}</button>
       @if (isHost()) {
-        <button type="button" (click)="changeCode()" [disabled]="busy()">Changer le code</button>
-        <button type="button" class="danger" (click)="closeRoom()" [disabled]="busy()">Fermer le salon</button>
+        <button type="button" (click)="changeCode()" [disabled]="busy()">{{ t('room.changeCode') }}</button>
+        <button type="button" class="danger" (click)="closeRoom()" [disabled]="busy()">{{ t('room.close') }}</button>
       }
     </div>
   </div>
 
   @if (loadError()) {
-    <p class="message error" role="alert">{{ loadError() }}</p>
+    <p class="message error" role="alert">{{ server(loadError()) }}</p>
   }
 
   <article class="card participants">
-    <h2>{{ online() ? 'Participants connectés' : 'Participants' }} ({{ participants().length }})</h2>
+    <h2>{{ online() ? t('room.participantsOnline') : t('room.participants') }} ({{ participants().length }})</h2>
     <ul>
       @for (participant of participants(); track participant.id) {
         <li>
           {{ participant.name }}
           @if (participant.id === session()?.participant?.id) {
-            <span class="badge">vous</span>
+            <span class="badge">{{ t('room.you') }}</span>
           }
         </li>
       }

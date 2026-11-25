@@ -1,38 +1,40 @@
+import { Translate } from '../i18n/i18n.service';
 import { PlaybackChange } from '../models/playback-change.model';
 import { expectedPosition, formatTime } from './sync-math';
 
 /**
  * Texte de la notice « qui a fait quoi » affichée à tout le salon, ou null
- * quand le changement ne mérite pas de notice.
+ * quand le changement ne mérite pas de notice. `t` traduit dans la langue
+ * choisie (voir I18nService).
  */
-export function describeChange(change: PlaybackChange, selfId: string | null): string | null {
+export function describeChange(change: PlaybackChange, selfId: string | null, t: Translate): string | null {
   const isSelf = change.by !== null && change.by.id === selfId;
-  const who = change.by ? (isSelf ? 'Vous avez' : `${change.by.name} a`) : null;
+  const name = change.by?.name ?? '';
 
   switch (change.action) {
     case 'load':
-      return who ? `${who} choisi un nouveau média` : null;
+      return change.by ? (isSelf ? t('notice.loadSelf') : t('notice.load', { name })) : null;
     case 'play':
-      return who ? `${who} lancé la lecture` : null;
+      return change.by ? (isSelf ? t('notice.playSelf') : t('notice.play', { name })) : null;
     case 'pause':
-      return who ? `${who} mis en pause` : null;
+      return change.by ? (isSelf ? t('notice.pauseSelf') : t('notice.pause', { name })) : null;
     case 'seek': {
       if (!change.by || !change.playback) return null;
       // L'état porte la position visée au moment de la commande.
-      const target = formatTime(expectedPosition(change.playback, change.playback.updatedAt));
-      return isSelf ? `Vous êtes allé à ${target}` : `${change.by.name} est allé à ${target}`;
+      const time = formatTime(expectedPosition(change.playback, change.playback.updatedAt));
+      return isSelf ? t('notice.seekSelf', { time }) : t('notice.seek', { name, time });
     }
     case 'buffering': {
       if (change.waitingFor.length === 0) return null;
       const names = change.waitingFor
-        .map((participant) => (participant.id === selfId ? 'vous' : participant.name))
+        .map((participant) => (participant.id === selfId ? t('notice.you') : participant.name))
         .join(', ');
-      return `Le salon attend ${names} (mise en mémoire tampon)…`;
+      return t('notice.buffering', { names });
     }
     case 'resume':
-      return 'Lecture reprise';
+      return t('notice.resume');
     case 'unload':
-      return 'Le média en cours a été supprimé';
+      return t('notice.unload');
     case 'ended':
       return null;
   }

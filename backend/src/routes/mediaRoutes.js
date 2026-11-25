@@ -65,6 +65,9 @@ export function mediaRoutes({ storage }) {
       const publicItems = items.map(({ _id, __v, updatedAt, storageKey, roomId, ...media }) => ({
         id: String(_id),
         ...media,
+        // Médias créés avant l'option « fichier local » : ce sont des uploads.
+        source: media.source ?? "upload",
+        duration: media.duration ?? null,
       }));
 
       console.log(`[media] ${publicItems.length} média(s) envoyé(s) sur ${total}`);
@@ -99,7 +102,7 @@ export function mediaRoutes({ storage }) {
       }
 
       const key = req.file.filename;
-      await storage.save({ tempPath: req.file.path, key });
+      await storage.save({ tempPath: req.file.path, key, mimeType: req.file.mimetype });
       stored = true;
 
       const media = await Media.create({
@@ -132,6 +135,55 @@ export function mediaRoutes({ storage }) {
   });
 
   /**
+   * Déclare un média local : rien n'est envoyé, seules ses métadonnées sont
+   * enregistrées. Pendant la lecture, chaque participant choisit sa propre
+   * copie du fichier ; le navigateur l'accepte si sa durée est la même (à
+   * 1 s près). Le nom, la taille ou le format peuvent différer.
+   * Corps JSON : { title, duration, kind, originalName?, mimeType?, size? }.
+   */
+  router.post("/local", roomAuth, async (req, res, next) => {
+    try {
+      const { title, duration, kind, originalName, mimeType, size } = req.body ?? {};
+      const invalid = (message) => {
+        console.warn(`[media] Média local refusé dans le salon ${req.room.id} : ${message}`);
+        return res.status(400).json({ message });
+      };
+
+      if (typeof title !== "string" || !title.trim() || title.trim().length > 200) {
+        return invalid("Titre requis (200 caractères maximum)");
+      }
+      if (typeof duration !== "number" || !Number.isFinite(duration) || duration <= 0) {
+        return invalid("Durée du média requise (nombre de secondes positif)");
+      }
+      if (kind !== "audio" && kind !== "video") {
+        return invalid("Type de média requis : audio ou video");
+      }
+      if ((await Media.countDocuments({ roomId: req.room.id })) >= MAX_MEDIA_PER_ROOM) {
+        console.warn(`[media] Quota atteint dans le salon ${req.room.id}`);
+        return res.status(409).json({ message: `Salon plein : ${MAX_MEDIA_PER_ROOM} médias maximum` });
+      }
+
+      const media = await Media.create({
+        roomId: req.room.id,
+        source: "local",
+        kind,
+        title: title.trim(),
+        duration,
+        originalName: typeof originalName === "string" ? originalName.slice(0, 255) : "",
+        mimeType: typeof mimeType === "string" ? mimeType.slice(0, 100) : "",
+        size: Number.isFinite(size) && size >= 0 ? size : 0,
+      });
+
+      console.log(`[media] Média local déclaré : ${media.id} (${duration.toFixed(1)} s)`);
+      roomEvents.emit("media:changed", req.room.id);
+      res.status(201).json(media.toPublic());
+    } catch (error) {
+      console.error("[media] Erreur pendant la déclaration du média local", error);
+      next(error);
+    }
+  });
+
+  /**
    * Fournit une URL de lecture temporaire à un participant du salon. <audio src> ne peut pas envoyer
    * d'en-tête Authorization : le navigateur charge donc cette URL signée, et
    * le lecteur diffuse le fichier par morceaux (requêtes Range).
@@ -146,6 +198,12 @@ export function mediaRoutes({ storage }) {
       if (!media) {
         console.warn(`[media] Média introuvable ou interdit : ${req.params.id}`);
         return res.status(404).json({ message: UNKNOWN_MEDIA });
+      }
+
+      // Média local : pas de fichier sur le serveur, le lecteur demandera à
+      // chaque participant de choisir sa propre copie.
+      if (media.source === "local") {
+        return res.json({ url: null, expiresAt: null, media: media.toPublic() });
       }
 
       const signed = await storage.signedUrl({
@@ -212,7 +270,7 @@ export function mediaRoutes({ storage }) {
       }
 
       try {
-        await storage.remove(media.storageKey);
+        if (media.storageKey) await storage.remove(media.storageKey); // rien à supprimer pour un média local
       } catch (error) {
         // L'exception n'est volontairement pas ignorée : l'administrateur doit
         // voir ce fichier orphelin si sa suppression échoue.

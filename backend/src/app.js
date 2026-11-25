@@ -9,6 +9,7 @@ import { UNSUPPORTED_FORMAT } from "./middleware/upload.js";
 import { mediaRoutes } from "./routes/mediaRoutes.js";
 import { roomRoutes } from "./routes/roomRoutes.js";
 import { createStorage } from "./storage/index.js";
+import { STORAGE_FULL, isStorageFull } from "./storage/errors.js";
 
 /**
  * Construit l'application Express sans ouvrir de port.
@@ -92,11 +93,11 @@ export function createApp({
     console.error("[error] Erreur reçue par le gestionnaire central", error);
 
     if (error instanceof multer.MulterError) {
-      const message =
-        error.code === "LIMIT_FILE_SIZE"
-          ? "Fichier trop volumineux (25 Mo maximum)"
-          : error.message;
-      return res.status(400).json({ message });
+      return res.status(400).json({ message: error.message });
+    }
+    // Disque ou quota de stockage épuisé : 507 Insufficient Storage.
+    if (isStorageFull(error)) {
+      return res.status(507).json({ message: STORAGE_FULL });
     }
     if (error?.message === UNSUPPORTED_FORMAT) {
       return res.status(400).json({ message: error.message });

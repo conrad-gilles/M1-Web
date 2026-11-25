@@ -41,6 +41,23 @@ npm run start:memory   # ou avec une base MongoDB locale, sans Atlas
 
 Le backend écoute sur `http://localhost:3000`.
 
+### Stockage des médias (Backblaze B2)
+
+Avec les cinq variables `S3_*` dans `.env` (voir `.env.example`), les fichiers
+vont dans le bucket privé Backblaze B2 ; sans elles, sur le disque local
+(`backend/data/uploads`), ce qui suffit pour développer hors ligne. Les tests
+utilisent toujours le disque local.
+
+```bash
+npm run check:storage   # aller-retour réel avec le bucket : envoi, lecture, Range, CORS, suppression
+npm run setup:cors      # une fois : règle CORS du bucket (lecture seule, origines de l'app)
+```
+
+Le navigateur lit les fichiers directement depuis B2 avec une URL présignée.
+Attention : en développement avec `.env`, les essais consomment le même quota
+gratuit que la production (10 Go stockés, 1 Go de lecture par jour). Sur
+Render, ajouter les cinq variables `S3_*` dans *Environment*.
+
 ## Démarrer le frontend
 
 Dans un autre terminal :
@@ -60,13 +77,41 @@ fenêtre de navigation privée ou un autre navigateur.
 Les fichiers de `frontend/fichiers-audio-de-test/` servent pour les essais, et
 les courtes vidéos de `e2e/fixtures/` (MP4, MKV, AVI, son silencieux) pour la vidéo.
 
+### Langues : français et anglais
+
+L'interface existe en français et en anglais. À la première visite, elle suit
+la langue du navigateur (français si c'est le français, anglais sinon) ; les
+boutons **FR / EN** de l'en-tête la changent aussitôt, et le choix est retenu.
+Les messages d'erreur du serveur, rédigés en français, sont traduits à
+l'affichage. Tous les textes sont dans
+`frontend/src/app/shared/i18n/translations.ts`.
+
+### Synchroniser des fichiers locaux (sans les envoyer)
+
+À côté de l'upload, la carte **« Synchroniser un fichier local »** ajoute au
+salon un média dont le fichier n'est jamais envoyé : seuls son titre, sa durée
+et son type partent au serveur. Quand il est lu, le lecteur du salon demande à
+chaque participant de choisir **sa propre copie** ; elle est acceptée si sa
+**durée est la même à 1 s près** (le nom, la taille et le format peuvent
+différer). La lecture passe ensuite par le même lecteur et la même
+synchronisation que les fichiers envoyés. Aucun stockage ni quota de
+téléchargement n'est consommé. Après un rechargement de la page, le navigateur
+demande de rechoisir le fichier (il ne peut pas le rouvrir seul), et le format
+doit être lisible par le navigateur (pas de conversion pour les fichiers
+locaux).
+
 ### Formats acceptés
 
 | Type | Formats | Limite |
 |---|---|---|
-| Audio | MP3, WAV, OGG, M4A | 25 Mo |
-| Vidéo | MP4, WebM, OGV | 25 Mo |
-| Vidéo convertie | MOV, AVI, MKV | 25 Mo après conversion ; avertissement au-delà de 200 Mo avant conversion |
+| Audio | MP3, WAV, OGG, M4A | Aucune ; avertissement à partir de 1 Go |
+| Vidéo | MP4, WebM, OGV | Aucune ; avertissement à partir de 1 Go |
+| Vidéo convertie | MOV, AVI, MKV | Aucune ; avertissement au-delà de 200 Mo (conversion sur l'appareil) et à partir de 1 Go |
+
+Il n'y a pas de limite de taille par fichier : la limite est le stockage
+gratuit. Quand il est plein, l'envoi échoue avec un message clair (erreur
+`507`). Quand le quota gratuit de lecture du jour est atteint (1 Go par jour
+avec Backblaze B2), le lecteur le dit au lieu d'une erreur générique.
 
 Les MOV, AVI et MKV sont convertis en MP4 **dans le navigateur** de la personne
 qui les envoie (`ffmpeg.wasm`), puis envoyés comme un MP4. Le convertisseur
@@ -88,7 +133,8 @@ création et entrée dans un salon, lecture synchronisée entre deux personnes
 (écart inférieur à 0,5 s), rattrapage d'un retard ou d'une avance, arrivant
 tardif, onglets d'un même navigateur, actions de l'hôte, affichage sur
 téléphone, vidéo (lecteur `<video>` synchronisé, conversion des MKV et AVI dans
-le navigateur). Le son des navigateurs de test est coupé.
+le navigateur), fichiers locaux synchronisés (chacun sa copie, refus d'une
+durée différente). Le son des navigateurs de test est coupé.
 
 La CI GitHub Actions ([ci.yml](.github/workflows/ci.yml)) lance les trois
 suites et le build Angular à chaque push.

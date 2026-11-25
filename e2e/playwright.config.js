@@ -25,6 +25,9 @@ export default defineConfig({
     ...devices["Desktop Chrome"],
     // Les tests lisent des médias : aucun son ne doit sortir de la machine.
     launchOptions: { args: ["--mute-audio"] },
+    // L'interface suit la langue du navigateur : les tests vérifient le
+    // français ; l'anglais est testé à part (langue.spec.js).
+    locale: "fr-FR",
     baseURL: `http://127.0.0.1:${PORT}`,
     trace: "retain-on-failure",
   },

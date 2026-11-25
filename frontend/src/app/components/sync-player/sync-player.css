@@ -25,6 +25,17 @@ video {
   border-radius: 0.5rem;
 }
 
+.local-pick {
+  margin: 0.75rem 0;
+  padding: 0.75rem 1rem;
+  border: 1px dashed rgba(0, 0, 0, 0.25);
+  border-radius: 0.5rem;
+}
+
+.local-pick p { margin-top: 0; }
+
+.local-pick input { display: block; margin-top: 0.25rem; }
+
 .gesture {
   display: block;
   width: 100%;

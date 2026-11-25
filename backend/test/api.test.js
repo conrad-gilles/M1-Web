@@ -157,8 +157,9 @@ test("pagination : page et limit, médias du salon uniquement, du plus récent a
   );
   assert.deepEqual(body.items.map((item) => item.title), ["C", "B"]);
   assert.deepEqual(Object.keys(body.items[0]).sort(), [
-    "createdAt", "id", "kind", "mimeType", "originalName", "size", "title",
+    "createdAt", "duration", "id", "kind", "mimeType", "originalName", "size", "source", "title",
   ]);
+  assert.deepEqual({ source: body.items[0].source, duration: body.items[0].duration }, { source: "upload", duration: null });
 });
 
 test("pagination : limit est plafonné à 20 et page à 1 minimum", async () => {

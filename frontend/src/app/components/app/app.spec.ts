@@ -27,6 +27,27 @@ describe('AppComponent', () => {
     expect(links()).toEqual([{ text: 'Accueil', href: '/' }]);
   });
 
+  it('le bouton EN passe toute l’interface en anglais, FR la remet en français', () => {
+    fixture = TestBed.createComponent(AppComponent);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    const button = (label: string) =>
+      Array.from(root.querySelectorAll<HTMLButtonElement>('.language button')).find((b) => b.textContent === label)!;
+
+    expect(button('FR').getAttribute('aria-pressed')).toBe('true');
+
+    button('EN').click();
+    fixture.detectChanges();
+    expect(links()).toEqual([{ text: 'Home', href: '/' }]);
+    expect(root.querySelector('header small')?.textContent).toBe('Listen and watch together, at the same moment');
+    expect(button('EN').getAttribute('aria-pressed')).toBe('true');
+    expect(localStorage.getItem('sharing_platform_language')).toBe('en');
+
+    button('FR').click();
+    fixture.detectChanges();
+    expect(links()).toEqual([{ text: 'Accueil', href: '/' }]);
+  });
+
   it('propose de revenir au salon en cours, et suit la session', () => {
     fixture = TestBed.createComponent(AppComponent);
     const session = TestBed.inject(RoomSessionService);

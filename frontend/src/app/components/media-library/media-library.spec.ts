@@ -9,6 +9,8 @@ import { MediaLibraryComponent } from './media-library';
 
 const track = (id: string, title = `Morceau ${id}`): Media => ({
   id,
+  source: 'upload',
+  duration: null,
   kind: 'audio',
   title,
   originalName: `${id}.mp3`,
@@ -391,7 +393,7 @@ describe('MediaLibraryComponent', () => {
         expect(component.busy()).toBe(false);
       });
 
-      it('refuse un résultat de plus de 25 Mo sans l’envoyer', async () => {
+      it('envoie un résultat de plus de 25 Mo : aucune limite de taille', async () => {
         create();
         converter.toMp4.mockResolvedValue(mp4(30 * 1024 * 1024));
         component.file = mkv();
@@ -399,10 +401,10 @@ describe('MediaLibraryComponent', () => {
         component.upload();
         await settle();
 
-        expect(component.uploadState()).toEqual({
-          status: 'error',
-          message: 'Vidéo convertie trop volumineuse (30.0 Mo). Taille maximale : 25 Mo.',
-        });
+        const request = postRequest();
+        expect(((request.request.body as FormData).get('file') as File).size).toBe(30 * 1024 * 1024);
+        request.flush(track('new'));
+        expectList(1).flush(page([track('new')]));
       });
     });
 
@@ -468,16 +470,51 @@ describe('MediaLibraryComponent', () => {
       expect((fixture.nativeElement as HTMLElement).textContent).toContain('Aucun média ne correspond à ce filtre');
     });
 
-    it('refuse un fichier de plus de 25 Mo avant tout envoi', () => {
+    it('accepte un fichier de plus de 25 Mo sans avertissement (moins de 1 Go)', () => {
       create();
-      const big = new File(['x'], 'gros.mp3', { type: 'audio/mpeg' });
-      Object.defineProperty(big, 'size', { value: 26 * 1024 * 1024 });
-      const input = { files: [big], value: 'gros.mp3' };
+      const big = new File(['x'], 'long.mp4', { type: 'video/mp4' });
+      Object.defineProperty(big, 'size', { value: 300 * 1024 * 1024 });
 
-      component.choose({ target: input } as unknown as Event);
+      component.choose({ target: { files: [big], value: 'long.mp4' } } as unknown as Event);
 
-      expect(component.file).toBeUndefined();
-      expect(component.fileError()).toBe('Fichier trop volumineux (26.0 Mo). Taille maximale : 25 Mo.');
+      expect(component.fileError()).toBe('');
+      expect(component.fileWarning()).toBe('');
+      expect(component.file?.name).toBe('long.mp4');
+    });
+
+    it('avertit sans bloquer à partir de 1 Go (quota de lecture gratuit)', () => {
+      create();
+      const huge = new File(['x'], 'film.mp4', { type: 'video/mp4' });
+      Object.defineProperty(huge, 'size', { value: 1.5 * 1024 ** 3 });
+
+      component.choose({ target: { files: [huge], value: 'film.mp4' } } as unknown as Event);
+      fixture.detectChanges();
+
+      const root = fixture.nativeElement as HTMLElement;
+      expect(component.file?.name).toBe('film.mp4');
+      expect(root.querySelector('.message.warning')?.textContent).toContain(
+        'Fichier de 1.5 Go : le stockage gratuit ne permet que 1 Go de lecture par jour',
+      );
+      expect(root.querySelector<HTMLButtonElement>('.card button')?.disabled).toBe(false);
+    });
+
+    it('le serveur plein (507) affiche son message clair', () => {
+      create();
+      component.file = new File(['abc'], 'song.mp3', { type: 'audio/mpeg' });
+
+      component.upload();
+      http
+        .expectOne((req) => req.method === 'POST' && req.url === '/api/media')
+        .flush(
+          { message: 'Espace de stockage gratuit épuisé : supprimez des médias du salon ou réessayez plus tard.' },
+          { status: 507, statusText: 'Insufficient Storage' },
+        );
+      fixture.detectChanges();
+
+      expect((fixture.nativeElement as HTMLElement).querySelector('[role="alert"]')?.textContent).toContain(
+        'Espace de stockage gratuit épuisé',
+      );
+      expect(component.title.enabled).toBe(true);
     });
 
     it('accepte un fichier sans type MIME grâce à son extension', () => {
@@ -523,7 +560,7 @@ describe('MediaLibraryComponent', () => {
       expect(component.fileError()).toBe('');
       expect(component.file?.name).toBe('film.mov');
       expect(root.querySelector('.message.warning')?.textContent).toContain(
-        'Fichier volumineux (250.0 Mo, 200 Mo recommandés au plus)',
+        "Conversion d'un gros fichier (250.0 Mo, 200 Mo recommandés au plus)",
       );
       // L'envoi reste possible.
       expect(root.querySelector<HTMLButtonElement>('.card button')?.disabled).toBe(false);
@@ -554,6 +591,19 @@ describe('MediaLibraryComponent', () => {
 
       expect(component.file).toBeUndefined();
       expect(component.fileError()).toContain('Format non supporté');
+    });
+
+    it('affiche un média local avec son badge et sa durée, sans taille ni format', () => {
+      create(
+        page([
+          { ...track('loc', 'Film du soir'), source: 'local', duration: 5423.48, kind: 'video', size: 1.4e9 },
+        ]),
+      );
+
+      const card = (fixture.nativeElement as HTMLElement).querySelector('.media-card')!;
+      expect(card.querySelector('.badge.local')?.textContent).toContain('Fichier local');
+      expect(card.textContent?.replace(/\s+/g, ' ')).toContain('Vidéo · durée 1:30:23');
+      expect(card.textContent).not.toContain('Go');
     });
 
     it('formate tailles, dates et types pour l’affichage', () => {

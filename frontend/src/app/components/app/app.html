@@ -1,13 +1,17 @@
 <header>
   <div>
     <b>Sharing Platform </b>
-    <small>Écoutez et regardez ensemble, au même instant</small>
+    <small>{{ t('app.tagline') }}</small>
   </div>
-  <nav aria-label="Navigation principale">
-    <a routerLink="/">Accueil</a>
+  <nav [attr.aria-label]="t('app.nav')">
+    <a routerLink="/">{{ t('app.home') }}</a>
     @if (session(); as current) {
-    <a [routerLink]="['/rooms', current.code]">Salon {{ current.code }}</a>
+    <a [routerLink]="['/rooms', current.code]">{{ t('app.room', { code: current.code }) }}</a>
     }
+    <span class="language" role="group" [attr.aria-label]="t('app.language')">
+      <button type="button" [attr.aria-pressed]="language() === 'fr'" (click)="i18n.use('fr')" lang="fr">FR</button>
+      <button type="button" [attr.aria-pressed]="language() === 'en'" (click)="i18n.use('en')" lang="en">EN</button>
+    </span>
   </nav>
 </header>
 

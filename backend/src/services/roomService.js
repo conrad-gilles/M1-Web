@@ -92,6 +92,7 @@ export function isExpired(room, now = Date.now()) {
 export async function deleteRoom(roomId, storage) {
   const medias = await Media.find({ roomId }).select("+storageKey");
   for (const media of medias) {
+    if (!media.storageKey) continue; // média local : aucun fichier côté serveur
     try {
       await storage.remove(media.storageKey);
     } catch (error) {

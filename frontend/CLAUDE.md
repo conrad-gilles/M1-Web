@@ -1,3 +1,5 @@
 # Claude instructions
 
 Follow `AGENTS.md` and `best-practices.md`. This project uses Angular 22 standalone components, `inject()`, Signals, Reactive Forms, and native `@if`/`@for` control flow. Keep shared infrastructure in `src/app/shared`. Preserve `../Documentation/API_CONTRACT.md` and `../Documentation/SYNC_PROTOCOL.md`; if a route or a Socket.IO event must change, change `backend/` in the same mission and update the matching document. The server is the single source of truth for playback: buttons send commands, the player only applies the shared state.
+
+The interface is bilingual (French and English). Never hard-code user-visible text: add a key to `FR` and `EN` in `src/app/shared/i18n/translations.ts` (the `EN` type rejects a missing translation) and display it with `t('key')` from `I18nService`. A new French message sent by the backend must also be added to `SERVER_MESSAGES_EN`. Unit tests run in French (`src/test-setup.ts`), e2e tests too (`locale: "fr-FR"`); English is covered by `i18n.service.spec.ts`, `app.spec.ts` and `e2e/tests/langue.spec.js`.

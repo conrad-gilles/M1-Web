@@ -13,12 +13,31 @@ const schema = new mongoose.Schema(
       ref: "Room",
       required: true,
     },
+    // upload : fichier envoyé, gardé par le module de stockage.
+    // local : rien n'est envoyé ; chaque participant lit sa propre copie du
+    // fichier, reconnue à sa durée (voir POST /media/local).
+    source: { type: String, enum: ["upload", "local"], default: "upload" },
     kind: { type: String, required: true, enum: ["audio", "video"] },
     title: { type: String, required: true, trim: true, maxlength: 200 },
-    originalName: { type: String, required: true },
-    storageKey: { type: String, required: true, select: false },
-    mimeType: { type: String, required: true },
+    originalName: { type: String, default: "", maxlength: 255 },
+    storageKey: {
+      type: String,
+      select: false,
+      required() {
+        return this.source !== "local";
+      },
+    },
+    mimeType: { type: String, default: "", maxlength: 100 },
     size: { type: Number, required: true, min: 0 },
+    // Durée en secondes, connue pour un média local (elle sert à vérifier que
+    // chacun a le même fichier) ; absente pour un fichier envoyé.
+    duration: {
+      type: Number,
+      min: 0,
+      required() {
+        return this.source === "local";
+      },
+    },
   },
   { timestamps: true },
 );
@@ -33,6 +52,8 @@ schema.index({ roomId: 1, createdAt: -1 });
 schema.methods.toPublic = function () {
   return {
     id: this.id,
+    source: this.source ?? "upload",
+    duration: this.duration ?? null,
     kind: this.kind,
     title: this.title,
     originalName: this.originalName,

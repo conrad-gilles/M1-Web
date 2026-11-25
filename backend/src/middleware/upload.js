@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import multer from "multer";
-import { ALLOWED_MIME_TYPES, DATA_DIR, MAX_FILE_SIZE } from "../config.js";
+import { ALLOWED_MIME_TYPES, DATA_DIR } from "../config.js";
 
 // Multer écrit d'abord dans un dossier temporaire ; le module de stockage
 // déplace ensuite le fichier à son emplacement définitif.
@@ -13,9 +13,9 @@ export const UNSUPPORTED_FORMAT = "Format de média non accepté";
 
 /*
  * Le nom aléatoire évite les collisions et n'utilise jamais `originalname`
- * comme chemin. limits.fileSize protège le serveur contre les fichiers trop
- * volumineux ; fileFilter refuse les types absents de la liste blanche avant
- * toute écriture.
+ * comme chemin. Aucune limite de taille : un disque plein est signalé par une
+ * erreur 507 (voir storage/errors.js). fileFilter refuse les types absents de
+ * la liste blanche avant toute écriture.
  */
 export const upload = multer({
   storage: multer.diskStorage({
@@ -26,7 +26,6 @@ export const upload = multer({
       callback(null, crypto.randomUUID() + safeExtension);
     },
   }),
-  limits: { fileSize: MAX_FILE_SIZE },
   fileFilter: (_request, file, callback) => {
     if (ALLOWED_MIME_TYPES.has(file.mimetype)) {
       console.log(`[multer] Type accepté : ${file.mimetype}`);

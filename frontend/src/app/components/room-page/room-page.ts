@@ -3,6 +3,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { MatSnackBar } from '@angular/material/snack-bar';
+import { I18nService } from '../../shared/i18n/i18n.service';
 import { Media } from '../../shared/models/media.model';
 import { Room } from '../../shared/models/room.model';
 import { RoomService } from '../../shared/services/room.service';
@@ -28,6 +29,9 @@ export class RoomPageComponent implements OnDestroy {
   private readonly sessionService = inject(RoomSessionService);
   private readonly router = inject(Router);
   private readonly snackBar = inject(MatSnackBar);
+  private readonly i18n = inject(I18nService);
+  readonly t = this.i18n.t;
+  readonly server = this.i18n.server;
   private readonly library = viewChild(MediaLibraryComponent);
 
   readonly session = this.sessionService.session;
@@ -60,7 +64,7 @@ export class RoomPageComponent implements OnDestroy {
 
     // Notice « qui a fait quoi » pour chaque changement de lecture.
     this.sync.changes$.pipe(takeUntilDestroyed()).subscribe((change) => {
-      const notice = describeChange(change, this.session()?.participant.id ?? null);
+      const notice = describeChange(change, this.session()?.participant.id ?? null, this.t);
       if (notice) this.snackBar.open(notice, undefined, { duration: NOTICE_DURATION });
     });
 
@@ -109,7 +113,7 @@ export class RoomPageComponent implements OnDestroy {
       error: (error: HttpErrorResponse) => {
         // Un 401 est déjà traité par roomClosedInterceptor (retour à l'accueil).
         console.error('[RoomPage] Chargement du salon impossible', error.status);
-        this.loadError.set(this.messageOf(error, 'Impossible de charger le salon.'));
+        this.loadError.set(this.messageOf(error, this.t('room.loadFailed')));
       },
     });
   }
@@ -117,11 +121,11 @@ export class RoomPageComponent implements OnDestroy {
   async copyLink(): Promise<void> {
     try {
       await navigator.clipboard.writeText(this.shareUrl());
-      this.notify('Lien du salon copié.');
+      this.notify(this.t('room.linkCopied'));
     } catch (error) {
       // Le presse-papiers est refusé hors HTTPS ou sans permission.
       console.warn('[RoomPage] Copie impossible', error);
-      this.notify(`Copie impossible. Partagez le code ${this.code()}.`);
+      this.notify(this.t('room.copyFailed', { code: this.code() }));
     }
   }
 
@@ -136,7 +140,7 @@ export class RoomPageComponent implements OnDestroy {
       error: (error: HttpErrorResponse) => {
         console.error('[RoomPage] Sortie impossible', error.status);
         this.busy.set(false);
-        this.notify(this.messageOf(error, 'Impossible de quitter le salon.'));
+        this.notify(this.messageOf(error, this.t('room.leaveFailed')));
       },
     });
   }
@@ -144,19 +148,19 @@ export class RoomPageComponent implements OnDestroy {
   /** Réservé à l'hôte : l'ancien code cesse de fonctionner. */
   changeCode(): void {
     if (this.busy()) return;
-    if (!confirm('Changer le code ? L’ancien code et l’ancien lien ne fonctionneront plus.')) return;
+    if (!confirm(this.t('room.confirmChangeCode'))) return;
 
     this.busy.set(true);
     this.rooms.changeCode().subscribe({
       next: (room) => {
         this.busy.set(false);
         this.applyRoom(room);
-        this.notify(`Nouveau code du salon : ${room.code}`);
+        this.notify(this.t('room.newCode', { code: room.code }));
       },
       error: (error: HttpErrorResponse) => {
         console.error('[RoomPage] Changement de code impossible', error.status);
         this.busy.set(false);
-        this.notify(this.messageOf(error, 'Impossible de changer le code.'));
+        this.notify(this.messageOf(error, this.t('room.changeCodeFailed')));
       },
     });
   }
@@ -164,7 +168,7 @@ export class RoomPageComponent implements OnDestroy {
   /** Réservé à l'hôte : supprime le salon et ses médias pour tout le monde. */
   closeRoom(): void {
     if (this.busy()) return;
-    if (!confirm('Fermer le salon pour tout le monde ? Ses médias seront supprimés.')) return;
+    if (!confirm(this.t('room.confirmClose'))) return;
 
     this.busy.set(true);
     this.rooms.close().subscribe({
@@ -175,7 +179,7 @@ export class RoomPageComponent implements OnDestroy {
       error: (error: HttpErrorResponse) => {
         console.error('[RoomPage] Fermeture impossible', error.status);
         this.busy.set(false);
-        this.notify(this.messageOf(error, 'Impossible de fermer le salon.'));
+        this.notify(this.messageOf(error, this.t('room.closeFailed')));
       },
     });
   }
@@ -188,7 +192,7 @@ export class RoomPageComponent implements OnDestroy {
    */
   play(media: Media): void {
     void this.sync.send({ type: 'load', mediaId: media.id }).then((result) => {
-      if (!result.ok) this.notify(result.message ?? 'Impossible de lire ce média.');
+      if (!result.ok) this.notify(result.message ? this.server(result.message) : this.t('room.playFailed'));
     });
   }
 
@@ -202,7 +206,8 @@ export class RoomPageComponent implements OnDestroy {
   }
 
   private notify(message: string): void {
-    this.snackBar.open(message, 'OK', { duration: SNACKBAR_DURATION });
+    // Un message du serveur (en français) est traduit ; les autres le sont déjà.
+    this.snackBar.open(this.server(message), 'OK', { duration: SNACKBAR_DURATION });
   }
 
   private messageOf(error: HttpErrorResponse, fallback: string): string {

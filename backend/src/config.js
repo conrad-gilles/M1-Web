@@ -19,8 +19,10 @@ export const FRONTEND_DIST = path.resolve(
   "../../frontend/dist/sharing-platform/browser",
 );
 
-// Les fichiers plus gros sont refusés par Multer avant la fin de l'écriture.
-export const MAX_FILE_SIZE = 25 * 1024 * 1024;
+// Pas de limite de taille par fichier (décision du projet, novembre 2026) :
+// la vraie limite est l'espace et le quota gratuits du stockage. Quand ils
+// sont épuisés, l'upload échoue avec une erreur 507 explicite (storage/errors.js)
+// et le frontend avertit l'utilisateur au-delà de 1 Go.
 
 // Durée de validité d'une URL de lecture. Elle doit couvrir la durée du média
 // (un film dure plusieurs heures) : 6 h par défaut.

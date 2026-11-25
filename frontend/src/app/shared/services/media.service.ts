@@ -1,6 +1,6 @@
 import { inject, Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Media } from '../models/media.model';
+import { LocalMediaDeclaration, Media } from '../models/media.model';
 import { MediaUrl } from '../models/media-url.model';
 import { Page } from '../models/page.model';
 
@@ -25,6 +25,11 @@ export class MediaService {
       reportProgress: true,
       observe: 'events',
     });
+  }
+
+  /** Déclare un média local : seules ses métadonnées sont envoyées, jamais le fichier. */
+  declareLocal(declaration: LocalMediaDeclaration) {
+    return this.http.post<Media>('/api/media/local', declaration);
   }
 
   /**

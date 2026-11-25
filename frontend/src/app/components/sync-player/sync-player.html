@@ -1,15 +1,42 @@
 <article class="card">
   <div class="row">
-    <h2>Lecteur du salon</h2>
+    <h2>{{ t('player.title') }}</h2>
     <span class="status" [class.offline]="!online()" role="status">{{ syncLabel() }}</span>
   </div>
 
   @if (media(); as current) {
-    <p class="now-playing">Lecture : <b>{{ current.title }}</b></p>
+    <p class="now-playing">{{ t('player.nowPlaying') }} <b>{{ current.title }}</b></p>
+
+    @if (needsLocalFile()) {
+      <!-- Média local : rien n'est téléchargé, chacun choisit sa propre copie. -->
+      <div class="local-pick">
+        <p>
+          <b>{{ t('player.localTitle') }}</b>
+          {{ t('player.localPick', { title: current.title, duration: formatDuration(current.duration ?? 0) }) }}
+        </p>
+        <label>
+          {{ t('player.localInput') }}
+          <input
+            type="file"
+            accept="audio/*,video/*,.mkv,.mov,.avi"
+            [disabled]="checkingLocal()"
+            (change)="chooseLocalFile($event)"
+          />
+        </label>
+        @if (checkingLocal()) {
+          <p class="message loading" role="status">{{ t('player.checkingDuration') }}</p>
+        }
+        @if (localError()) {
+          <p class="message error" role="alert">{{ localError() }}</p>
+        }
+      </div>
+    }
 
     <!-- Pas d'attribut `controls` : les boutons ci-dessous envoient des
          commandes au salon, et le lecteur applique l'état reçu en retour. -->
-    @if (current.kind === 'video') {
+    @if (!url()) {
+      <!-- URL pas encore reçue, ou fichier local pas encore choisi. -->
+    } @else if (playerKind() === 'video') {
       <video
         #player
         [src]="url()"
@@ -33,9 +60,7 @@
     }
 
     @if (needsGesture()) {
-      <button type="button" class="gesture" (click)="enableSound()">
-        ▶ Cliquer pour rejoindre la lecture du salon
-      </button>
+      <button type="button" class="gesture" (click)="enableSound()">{{ t('player.join') }}</button>
     }
 
     <div class="timeline">
@@ -49,22 +74,28 @@
         [disabled]="!online() || duration() === 0"
         (input)="onScrub($event)"
         (change)="onScrubEnd($event)"
-        aria-label="Position dans le média (déplace tout le salon)"
-        [attr.aria-valuetext]="formatTime(shownPosition()) + ' sur ' + formatTime(duration())"
+        [attr.aria-label]="t('player.position')"
+        [attr.aria-valuetext]="
+          t('player.positionOf', { position: formatTime(shownPosition()), duration: formatTime(duration()) })
+        "
       />
       <span aria-hidden="true">{{ formatTime(duration()) }}</span>
     </div>
 
     <div class="controls">
-      <button type="button" (click)="skip(-10)" [disabled]="!online()" aria-label="Reculer de 10 secondes">−10 s</button>
-      <button type="button" class="main" (click)="togglePlay()" [disabled]="!online()">
-        {{ paused() ? '▶ Lecture' : '⏸ Pause' }}
+      <button type="button" (click)="skip(-10)" [disabled]="!online()" [attr.aria-label]="t('player.back10')">
+        −10 s
       </button>
-      <button type="button" (click)="skip(10)" [disabled]="!online()" aria-label="Avancer de 10 secondes">+10 s</button>
+      <button type="button" class="main" (click)="togglePlay()" [disabled]="!online()">
+        {{ paused() ? t('player.play') : t('player.pause') }}
+      </button>
+      <button type="button" (click)="skip(10)" [disabled]="!online()" [attr.aria-label]="t('player.forward10')">
+        +10 s
+      </button>
 
       <span class="local">
         <button type="button" (click)="toggleMute()" [attr.aria-pressed]="muted()">
-          {{ muted() ? 'Son coupé' : 'Son' }}
+          {{ muted() ? t('player.muted') : t('player.sound') }}
         </button>
         <input
           type="range"
@@ -73,32 +104,28 @@
           step="0.05"
           [value]="volume()"
           (input)="setVolume($event)"
-          aria-label="Volume (réglage local)"
+          [attr.aria-label]="t('player.volume')"
         />
-        @if (current.kind === 'video') {
-          <button type="button" (click)="fullscreen()">Plein écran</button>
+        @if (playerKind() === 'video' && url()) {
+          <button type="button" (click)="fullscreen()">{{ t('player.fullscreen') }}</button>
         }
       </span>
     </div>
 
     @if (waitingFor().length > 0) {
-      <p class="message loading" role="status">
-        Le salon attend {{ waitingNames() }} (mise en mémoire tampon, 10 s au plus)…
-      </p>
+      <p class="message loading" role="status">{{ t('player.waitingFor', { names: waitingNames() }) }}</p>
     }
   } @else if (!error()) {
-    <p>
-      {{ state() ? 'Chargement du média…' : 'Choisissez un média ci-dessous : il sera lu pour tout le salon.' }}
-    </p>
+    <p>{{ state() ? t('player.loading') : t('player.empty') }}</p>
   }
 
   @if (error()) {
     <p class="message error" role="alert">
-      {{ error() }}
-      <button type="button" (click)="retry()">Réessayer</button>
+      {{ server(error()) }}
+      <button type="button" (click)="retry()">{{ t('player.retry') }}</button>
     </p>
   }
   @if (commandError()) {
-    <p class="message error" role="alert">{{ commandError() }}</p>
+    <p class="message error" role="alert">{{ server(commandError()) }}</p>
   }
 </article>

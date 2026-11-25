@@ -1,42 +1,42 @@
 <section>
   <div class="hero">
     <p class="eyebrow">WATCH PARTY</p>
-    <h1>Le même média, au même instant</h1>
-    <p>Créez un salon, partagez son code : tout le monde suit la même lecture. Aucun compte.</p>
+    <h1>{{ t('home.title') }}</h1>
+    <p>{{ t('home.lead') }}</p>
   </div>
 
   @if (roomClosed) {
-    <p class="message info" role="status">Ce salon a été fermé ou a expiré.</p>
+    <p class="message info" role="status">{{ t('home.closed') }}</p>
   }
   @if (session(); as current) {
     <p class="message info">
-      Vous êtes dans le salon <b>{{ current.code }}</b>.
-      <a [routerLink]="['/rooms', current.code]">Y retourner</a>
+      {{ t('home.inRoom') }} <b>{{ current.code }}</b>.
+      <a [routerLink]="['/rooms', current.code]">{{ t('home.goBack') }}</a>
     </p>
   }
 
   <div class="grid">
     <article class="card">
-      <h2>Créer un salon</h2>
+      <h2>{{ t('home.create') }}</h2>
       <form [formGroup]="createForm" (ngSubmit)="create()">
         <label>
-          Votre nom
+          {{ t('home.name') }}
           <input formControlName="name" maxlength="30" autocomplete="nickname" />
         </label>
         <button type="submit" [disabled]="createForm.invalid || pending() !== null">
-          {{ pending() === 'create' ? 'Création…' : 'Créer un salon' }}
+          {{ pending() === 'create' ? t('home.creating') : t('home.create') }}
         </button>
       </form>
       @if (createError()) {
-        <p class="message error" role="alert">{{ createError() }}</p>
+        <p class="message error" role="alert">{{ server(createError()) }}</p>
       }
     </article>
 
     <article class="card">
-      <h2>Rejoindre un salon</h2>
+      <h2>{{ t('home.join') }}</h2>
       <form [formGroup]="joinForm" (ngSubmit)="join()">
         <label>
-          Code du salon
+          {{ t('home.code') }}
           <input
             class="code"
             formControlName="code"
@@ -48,15 +48,15 @@
           />
         </label>
         <label>
-          Votre nom
+          {{ t('home.name') }}
           <input formControlName="name" maxlength="30" autocomplete="nickname" />
         </label>
         <button type="submit" [disabled]="joinForm.invalid || pending() !== null">
-          {{ pending() === 'join' ? 'Entrée…' : 'Rejoindre le salon' }}
+          {{ pending() === 'join' ? t('home.joining') : t('home.joinButton') }}
         </button>
       </form>
       @if (joinError()) {
-        <p class="message error" role="alert">{{ joinError() }}</p>
+        <p class="message error" role="alert">{{ server(joinError()) }}</p>
       }
     </article>
   </div>

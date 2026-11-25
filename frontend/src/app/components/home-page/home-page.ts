@@ -2,6 +2,7 @@ import { Component, inject, signal } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { I18nService } from '../../shared/i18n/i18n.service';
 import { RoomAccess } from '../../shared/models/room-access.model';
 import { RoomService } from '../../shared/services/room.service';
 import { RoomSessionService } from '../../shared/services/room-session.service';
@@ -23,6 +24,11 @@ export class HomePageComponent {
   private readonly rooms = inject(RoomService);
   private readonly router = inject(Router);
   private readonly query = inject(ActivatedRoute).snapshot.queryParamMap;
+
+  private readonly i18n = inject(I18nService);
+  readonly t = this.i18n.t;
+  /** Les erreurs sont gardées dans la langue d'origine et traduites à l'affichage. */
+  readonly server = this.i18n.server;
 
   readonly session = inject(RoomSessionService).session;
   readonly pending = signal<PendingAction>(null);
@@ -67,7 +73,7 @@ export class HomePageComponent {
       error: (error: HttpErrorResponse) => {
         console.error('[HomePage] Création du salon impossible', error.status);
         this.pending.set(null);
-        this.createError.set(this.messageOf(error, 'Impossible de créer le salon.'));
+        this.createError.set(this.messageOf(error, this.t('home.createFailed')));
       },
     });
   }
@@ -83,7 +89,7 @@ export class HomePageComponent {
       error: (error: HttpErrorResponse) => {
         console.error('[HomePage] Entrée dans le salon impossible', error.status);
         this.pending.set(null);
-        this.joinError.set(this.messageOf(error, 'Impossible de rejoindre le salon.'));
+        this.joinError.set(this.messageOf(error, this.t('home.joinFailed')));
       },
     });
   }

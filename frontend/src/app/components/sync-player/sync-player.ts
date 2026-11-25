@@ -14,6 +14,10 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { Media } from '../../shared/models/media.model';
 import { PlaybackState } from '../../shared/models/playback-state.model';
 import { MediaService } from '../../shared/services/media.service';
+import { ChosenFile, LocalFilesService } from '../../shared/services/local-files.service';
+import { formatDuration, sameDuration } from '../../shared/local-media/local-media';
+import { I18nService } from '../../shared/i18n/i18n.service';
+import { TranslationKey } from '../../shared/i18n/translations';
 import { SyncService } from '../../shared/services/sync.service';
 import { driftCorrection, expectedPosition, formatTime } from '../../shared/sync/sync-math';
 
@@ -32,6 +36,18 @@ const HAVE_FUTURE_DATA = 3;
 const SKIP_SECONDS = 10;
 
 /**
+ * Message à afficher selon le statut HTTP de l'URL du média. 403 : c'est
+ * ainsi que Backblaze B2 refuse un téléchargement une fois le quota gratuit
+ * du jour épuisé (download_cap_exceeded).
+ */
+export function mediaErrorMessage(status: number): TranslationKey {
+  if (status === 403) return 'player.errorQuota';
+  if (status === 401) return 'player.errorExpired';
+  if (status === 404) return 'player.errorMissing';
+  return 'player.errorDefault';
+}
+
+/**
  * Synchronized player of a room.
  *
  * Ce composant n'a pas les contrôles natifs du navigateur : ses boutons
@@ -48,6 +64,10 @@ const SKIP_SECONDS = 10;
 export class SyncPlayerComponent implements OnDestroy {
   private readonly sync = inject(SyncService);
   private readonly mediaService = inject(MediaService);
+  private readonly localFiles = inject(LocalFilesService);
+  private readonly i18n = inject(I18nService);
+  readonly t = this.i18n.t;
+  readonly server = this.i18n.server;
 
   /** Émis quand le média chargé dans le lecteur change (null : lecteur vide). */
   readonly mediaChange = output<Media | null>();
@@ -72,16 +92,28 @@ export class SyncPlayerComponent implements OnDestroy {
   readonly volume = signal(1);
   readonly muted = signal(false);
 
+  // --- Média local : chaque participant choisit sa propre copie ---------------
+  /** Nature du fichier local choisi (une copie vidéo d'un média audio reste une vidéo). */
+  readonly localKind = signal<'audio' | 'video' | null>(null);
+  readonly localError = signal('');
+  readonly checkingLocal = signal(false);
+  /** Média local du salon pour lequel ce participant n'a pas encore choisi de fichier. */
+  readonly needsLocalFile = computed(() => this.media()?.source === 'local' && !this.url());
+  readonly playerKind = computed(() => this.localKind() ?? this.media()?.kind ?? 'audio');
+
   readonly paused = computed(() => this.state()?.paused ?? true);
   readonly shownPosition = computed(() => this.scrubPosition() ?? this.position());
   readonly waitingNames = computed(() => this.waitingFor().map((participant) => participant.name).join(', '));
   readonly syncLabel = computed(() => {
-    if (!this.online()) return 'Reconnexion au salon…';
-    if (this.needsGesture()) return 'En attente de votre clic';
-    if (this.buffering()) return 'Mise en mémoire tampon…';
+    const t = this.t;
+    if (!this.online()) return t('player.reconnecting');
+    if (this.needsGesture()) return t('player.waitingClick');
+    if (this.buffering()) return t('player.buffering');
     const drift = this.drift();
-    if (this.paused() || drift === null) return 'Synchronisé';
-    return Math.abs(drift) < 0.1 ? `Synchronisé (écart ${Math.abs(drift).toFixed(2)} s)` : 'Rattrapage…';
+    if (this.paused() || drift === null) return t('player.synced');
+    return Math.abs(drift) < 0.1
+      ? t('player.syncedDrift', { drift: Math.abs(drift).toFixed(2) })
+      : t('player.catchingUp');
   });
 
   private readonly player = viewChild<ElementRef<HTMLMediaElement>>('player');
@@ -89,6 +121,8 @@ export class SyncPlayerComponent implements OnDestroy {
 
   /** Identifiant du média demandé en dernier, pour ignorer une réponse périmée. */
   private requestedId: string | null = null;
+  /** URL `blob:` du fichier local en lecture, à libérer au changement de média. */
+  private objectUrl: string | null = null;
   /** Vrai pendant un rattrapage par la vitesse (voir driftCorrection). */
   private correcting = false;
   private lastCorrectionAt = 0;
@@ -117,7 +151,64 @@ export class SyncPlayerComponent implements OnDestroy {
 
   ngOnDestroy(): void {
     clearInterval(this.timer);
+    this.releaseLocalFile();
   }
+
+  // --- Média local --------------------------------------------------------------
+
+  /**
+   * Le participant choisit sa copie du média local. Elle est acceptée si sa
+   * durée est celle du média du salon (à 1 s près) ; le nom et le format
+   * peuvent différer. Rien n'est envoyé : le lecteur lit le fichier sur place.
+   */
+  async chooseLocalFile(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    const media = this.media();
+    if (!file || media?.source !== 'local') return;
+
+    this.localError.set('');
+    this.checkingLocal.set(true);
+    try {
+      const info = await this.localFiles.probe(file);
+      if (this.media()?.id !== media.id) return; // le salon a changé de média entre-temps
+      if (!sameDuration(media.duration ?? 0, info.duration)) {
+        console.warn('[SyncPlayer] Fichier local refusé : durée différente', info.duration, media.duration);
+        this.localError.set(
+          this.t('local.mismatch', {
+            actual: formatDuration(info.duration),
+            expected: formatDuration(media.duration ?? 0),
+          }),
+        );
+        input.value = '';
+        return;
+      }
+      const chosen = { file, info };
+      this.localFiles.remember(media.id, chosen);
+      this.useLocalFile(chosen);
+    } catch (error) {
+      console.warn('[SyncPlayer] Fichier local illisible', error);
+      this.localError.set(this.t('player.localUnreadable'));
+      input.value = '';
+    } finally {
+      this.checkingLocal.set(false);
+    }
+  }
+
+  private useLocalFile({ file, info }: ChosenFile): void {
+    this.releaseLocalFile();
+    this.objectUrl = URL.createObjectURL(file);
+    this.localKind.set(info.kind);
+    this.url.set(this.objectUrl);
+    console.debug('[SyncPlayer] Lecture du fichier local', file.name);
+  }
+
+  private releaseLocalFile(): void {
+    if (this.objectUrl) URL.revokeObjectURL(this.objectUrl);
+    this.objectUrl = null;
+  }
+
+  formatDuration = formatDuration;
 
   // --- Commandes : les boutons parlent au serveur, pas au lecteur -----------
 
@@ -148,7 +239,7 @@ export class SyncPlayerComponent implements OnDestroy {
   private command(command: Parameters<SyncService['send']>[0]): void {
     this.commandError.set('');
     void this.sync.send(command).then((result) => {
-      if (!result.ok) this.commandError.set(result.message ?? 'Commande refusée.');
+      if (!result.ok) this.commandError.set(result.message ?? this.t('player.commandRefused'));
     });
   }
 
@@ -204,10 +295,28 @@ export class SyncPlayerComponent implements OnDestroy {
   }
 
   onMediaError(): void {
-    // L'élément ne donne qu'une erreur générique : fichier illisible, lien
-    // expiré ou quota de téléchargement du stockage atteint.
+    // L'élément ne donne qu'une erreur générique. Pour expliquer la cause
+    // (quota gratuit du jour atteint, lien expiré, média supprimé), on relit
+    // le code HTTP de l'URL en ne demandant qu'un octet.
     console.error('[SyncPlayer] Le lecteur a signalé une erreur');
-    this.error.set('Média temporairement indisponible. Réessayez dans un instant.');
+    const media = this.media();
+    if (media?.source === 'local') {
+      // Fichier de l'appareil : pas de serveur à interroger. On oublie cette
+      // copie pour que « Réessayer » en fasse choisir une autre.
+      this.localFiles.forget(media.id);
+      this.error.set(this.t('player.localBroken'));
+      return;
+    }
+    this.error.set(this.t('player.errorDefault'));
+    const url = this.url();
+    if (!url) return;
+    void fetch(url, { headers: { Range: 'bytes=0-0' } })
+      .then((response) => {
+        if (this.url() !== url) return; // le salon a changé de média entre-temps
+        console.warn('[SyncPlayer] Cause de l’erreur de lecture : HTTP', response.status);
+        this.error.set(this.t(mediaErrorMessage(response.status)));
+      })
+      .catch(() => undefined); // réseau coupé : le message générique reste
   }
 
   formatTime = formatTime;
@@ -228,16 +337,23 @@ export class SyncPlayerComponent implements OnDestroy {
     this.mediaService.streamUrl(mediaId).subscribe({
       next: ({ url, media }) => {
         if (this.requestedId !== mediaId) return; // le salon a déjà changé de média
-        console.debug('[SyncPlayer] URL de lecture reçue', mediaId);
         this.media.set(media);
-        this.url.set(url);
         this.mediaChange.emit(media);
+        if (media.source === 'local') {
+          // Pas d'URL : chacun lit sa copie. Fichier déjà choisi pendant la session ?
+          this.duration.set(media.duration ?? 0);
+          const chosen = this.localFiles.get(media.id);
+          if (chosen) this.useLocalFile(chosen);
+          return;
+        }
+        console.debug('[SyncPlayer] URL de lecture reçue', mediaId);
+        this.url.set(url ?? '');
       },
       error: (error: HttpErrorResponse) => {
         if (this.requestedId !== mediaId) return;
         console.error('[SyncPlayer] Média impossible à charger', error.status);
         const serverMessage: unknown = error.error?.message;
-        this.error.set(typeof serverMessage === 'string' ? serverMessage : 'Impossible de charger ce média.');
+        this.error.set(typeof serverMessage === 'string' ? serverMessage : this.t('player.loadFailed'));
       },
     });
   }
@@ -246,6 +362,10 @@ export class SyncPlayerComponent implements OnDestroy {
     if (this.media()) this.mediaChange.emit(null);
     this.media.set(null);
     this.url.set('');
+    this.releaseLocalFile();
+    this.localKind.set(null);
+    this.localError.set('');
+    this.checkingLocal.set(false);
     this.error.set('');
     this.commandError.set('');
     this.position.set(0);

@@ -156,16 +156,47 @@ test("fichier disparu du stockage : le flux répond 404", async () => {
   assert.equal((await r.json()).message, "Média inconnu");
 });
 
-test("fichier de plus de 25 Mo : 400 explicite, rien n'est gardé", async () => {
+test("pas de limite de taille : un fichier de plus de 25 Mo est accepté", async () => {
   const { token } = await t.createRoom();
 
   const r = await t.upload(token, {
-    file: { content: new Uint8Array(25 * 1024 * 1024 + 1), type: "audio/mpeg", name: "gros.mp3" },
+    file: { content: new Uint8Array(30 * 1024 * 1024), type: "video/mp4", name: "long.mp4" },
   });
 
-  assert.equal(r.status, 400);
-  assert.equal((await r.json()).message, "Fichier trop volumineux (25 Mo maximum)");
-  assert.deepEqual(t.storedFiles(), []);
+  assert.equal(r.status, 201);
+  assert.equal((await r.json()).size, 30 * 1024 * 1024);
+  assert.equal(t.storedFiles().length, 1);
+});
+
+test("stockage plein : 507 explicite, aucun fichier ni métadonnée gardés", async () => {
+  const { token } = await t.createRoom();
+  let tempPath;
+  mock.method(t.storage, "save", async (file) => {
+    tempPath = file.tempPath;
+    throw Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" });
+  });
+
+  const r = await t.upload(token, { file: mp3() });
+
+  assert.equal(r.status, 507);
+  assert.equal(
+    (await r.json()).message,
+    "Espace de stockage gratuit épuisé : supprimez des médias du salon ou réessayez plus tard.",
+  );
+  assert.equal(fs.existsSync(tempPath), false);
+  assert.equal(t.db.all(Media).length, 0);
+});
+
+test("quota du stockage distant atteint (code STORAGE_FULL) : même 507", async () => {
+  const { token } = await t.createRoom();
+  mock.method(t.storage, "save", async () => {
+    throw Object.assign(new Error("quota B2 atteint"), { code: "STORAGE_FULL" });
+  });
+
+  const r = await t.upload(token, { file: mp3() });
+
+  assert.equal(r.status, 507);
+  assert.match((await r.json()).message, /Espace de stockage gratuit épuisé/);
 });
 
 test("corps JSON illisible : 400 « Corps JSON invalide »", async () => {
